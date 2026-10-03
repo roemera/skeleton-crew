@@ -64,6 +64,8 @@ wss.on('connection', (ws: WebSocket, req) => {
       match.fire(player, msg);
     } else if (msg.t === 'hit' && player) {
       match.hit(player, msg);
+    } else if (msg.t === 'break' && player) {
+      match.breakObject(player, msg.id);
     } else if (msg.t === 'start' && player) {
       console.log(`[start] #${player.id} ${player.name} started the match`);
       match.forceStart();

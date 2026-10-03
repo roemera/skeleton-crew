@@ -30,6 +30,8 @@ export class Match {
   phase: Phase = 'lobby';
   countdown = 0;
   private spawns: Spawn[];
+  private destructible: Set<number>; // ids of map objects that can break
+  readonly broken = new Set<number>(); // broken this match; everything stands again at the next
   private countdownTimer: ReturnType<typeof setInterval> | null = null;
 
   readonly seed: number;
@@ -39,7 +41,9 @@ export class Match {
   constructor(seed: number, killLimit: number) {
     this.seed = seed;
     this.killLimit = killLimit;
-    this.spawns = generateMap(seed).spawns;
+    const map = generateMap(seed);
+    this.spawns = map.spawns;
+    this.destructible = new Set(map.objects.filter((o) => o.destructible).map((o) => o.id));
   }
 
   get full() {
@@ -58,7 +62,7 @@ export class Match {
       kills: 0, deaths: 0, shots: 0, hits: 0, hitShells: new Set(), respawnTimer: null,
     };
     this.players.set(p.id, p);
-    p.send({ t: 'welcome', id: p.id, seed: this.seed, players: this.list(), phase: this.phase, spawn: this.pickSpawn(p.id) });
+    p.send({ t: 'welcome', id: p.id, seed: this.seed, players: this.list(), phase: this.phase, spawn: this.pickSpawn(p.id), broken: [...this.broken] });
     this.broadcastLobby();
     return p;
   }
@@ -109,6 +113,7 @@ export class Match {
     if (this.countdownTimer) clearInterval(this.countdownTimer);
     this.countdownTimer = null;
     this.phase = 'live';
+    this.broken.clear();
     for (const p of this.players.values()) this.resetCombat(p);
     // Everyone to a different spawn, in random order.
     const order = this.spawns.map((_, i) => i).sort(() => Math.random() - 0.5);
@@ -164,6 +169,13 @@ export class Match {
     this.broadcast({ t: 'kill', victim: target.id, killer: from.id, zone: msg.zone, scores: this.scores() });
     if (from.kills >= this.killLimit) return this.endMatch(from.id);
     target.respawnTimer = setTimeout(() => this.respawn(target), RESPAWN_DELAY * 1000);
+  }
+
+  /** A player broke a map object. Record it once and tell everyone else. */
+  breakObject(from: Player, id: number) {
+    if (this.phase !== 'live' || !this.destructible.has(id) || this.broken.has(id)) return;
+    this.broken.add(id);
+    for (const p of this.players.values()) if (p !== from) p.send({ t: 'break', id });
   }
 
   private respawn(p: Player) {

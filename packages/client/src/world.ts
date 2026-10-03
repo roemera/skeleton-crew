@@ -13,6 +13,7 @@ const lambert = (map: THREE.Texture, extra: THREE.MeshLambertMaterialParameters 
 interface Breakable {
   obj: MapObject;
   mesh: THREE.Object3D;
+  desc: RAPIER.ColliderDesc; // kept to rebuild the collider when the map resets
   collider: RAPIER.Collider;
   broken: boolean;
 }
@@ -27,6 +28,9 @@ interface Debris {
 export class World {
   readonly scene = new THREE.Scene();
   readonly breakables = new Map<number, Breakable>(); // by sensor collider handle
+  readonly breakablesById = new Map<number, Breakable>(); // by map object id (what the network uses)
+  /** Called when something here (our tank, a shell) breaks an object, so it can be sent to the server. */
+  onBreak: (id: number) => void = () => {};
   private debris: Debris[] = [];
   private trees: THREE.Object3D[] = [];
   private time = 0;
@@ -168,11 +172,14 @@ export class World {
     }
     desc.setRotation(rot);
     // Breakable objects are sensors: tanks drive through them and break them (no snag on contact).
-    // Milestone 2 makes walls solid to shells; milestone 5 syncs breaks over the network.
     if (o.destructible) desc.setSensor(true);
     const collider = this.physics.createCollider(desc);
     this.scene.add(group);
-    if (o.destructible) this.breakables.set(collider.handle, { obj: o, mesh: group, collider, broken: false });
+    if (o.destructible) {
+      const b = { obj: o, mesh: group, desc, collider, broken: false };
+      this.breakables.set(collider.handle, b);
+      this.breakablesById.set(o.id, b);
+    }
   }
 
   /** Break objects a fast enough tank is touching. */
@@ -180,7 +187,10 @@ export class World {
     if (tankSpeed < DESTRUCT_SPEED) return;
     this.physics.intersectionPairsWith(tankCollider, (other) => {
       const b = this.breakables.get(other.handle);
-      if (b && !b.broken) this.breakObject(b, tankCollider.parent()!.linvel());
+      if (b && !b.broken) {
+        this.breakObject(b, tankCollider.parent()!.linvel());
+        this.onBreak(b.obj.id);
+      }
     });
   }
 
@@ -189,13 +199,33 @@ export class World {
     const b = this.breakables.get(handle);
     if (!b || b.broken) return null;
     this.breakObject(b, { x: dir.x * 8, y: 0, z: dir.z * 8 });
+    this.onBreak(b.obj.id);
     return b.obj;
   }
 
-  private breakObject(b: Breakable, push: RAPIER.Vector) {
+  /** Someone else broke it (from the server). `debris: false` for objects broken before we joined. */
+  breakById(id: number, debris = true) {
+    const b = this.breakablesById.get(id);
+    if (b && !b.broken) this.breakObject(b, { x: 0, y: 0, z: 0 }, debris);
+  }
+
+  /** New match: everything stands again. */
+  resetBreakables() {
+    for (const b of this.breakablesById.values()) {
+      if (!b.broken) continue;
+      this.breakables.delete(b.collider.handle);
+      b.collider = this.physics.createCollider(b.desc);
+      this.breakables.set(b.collider.handle, b);
+      b.mesh.visible = true;
+      b.broken = false;
+    }
+  }
+
+  private breakObject(b: Breakable, push: RAPIER.Vector, debris = true) {
     b.broken = true;
     b.mesh.visible = false;
     this.physics.removeCollider(b.collider, false);
+    if (!debris) return;
     const [w, h, d] = b.obj.size;
     const rng = makeRng(b.obj.id + 5000);
     const sourceMat = (b.mesh.children[b.mesh.children.length - 1] as THREE.Mesh).material as THREE.Material;

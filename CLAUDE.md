@@ -10,7 +10,7 @@ Design doc: https://claude.ai/code/artifact/6ed43f7e-4ee7-4297-b6c4-ff1759a31cf7
   keeps the game simple. Spend polish only where it changes how the game plays.
 - Everything is generated in code: map (seeded), models (boxes/cylinders), textures (tiny canvases),
   sounds (procedural, bitcrushed). No asset files.
-- No minimap. Information comes from the lookout, the compass strip and directional sound.
+- No minimap and no spotting markers. Information comes from looking (lookout seat) and directional sound.
 - Trusted clients, dev-run server, password to join. No anti-cheat, no matchmaking.
 
 ## Code

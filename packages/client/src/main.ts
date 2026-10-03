@@ -232,6 +232,9 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
   // --- Network ---
   let sendTimer = 0;
   if (net && remotes) {
+    // Map objects: what was broken before we joined, and what we break, goes through the server.
+    for (const id of welcome!.broken) world.breakById(id, false);
+    world.onBreak = (id) => net.sendBreak(id);
     const showLobby = (players: Parameters<Menu['lobby']>[0], countdown: number) =>
       menu.lobby(players, phase, countdown, net.id, (ready) => net.setReady(ready), () => net.startMatch());
     if (phase !== 'live') showLobby(welcome!.players, 0);
@@ -243,6 +246,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
           // New match: fresh scores, and every wreck from the last one is back in action.
           scores = zeroScores(msg.players);
           for (const id of remotes.byId.keys()) remotes.respawn(id);
+          world.resetBreakables();
         }
         phase = msg.phase;
         if (phase === 'live') menu.hide();
@@ -300,6 +304,8 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
           if (r) fx.fire(r.model.root.position.clone().add(new THREE.Vector3(0, 1.2, 0)), RESPAWN_DELAY);
           say(msg.killer === net.id ? `YOU KILLED ${victim}` : `${killer} KILLED ${victim}`, msg.killer === net.id ? HUD_COLORS.lime : HUD_COLORS.white);
         }
+      } else if (msg.t === 'break') {
+        world.breakById(msg.id);
       } else if (msg.t === 'respawn') {
         if (msg.id !== net.id) remotes.respawn(msg.id);
       } else if (msg.t === 'results') {

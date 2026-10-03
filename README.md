@@ -81,4 +81,7 @@ packages/
 - Milestone 4 (networked combat): done. The shooter's game reports hits, the server owns health,
   breaks parts, counts kills; 5 s respawn with 3 s spawn protection; a shell exploding within 3 m
   of a lookout's open hatch kills outright; first to the kill limit wins, 15 s results, then lobby.
-- Next: milestone 5, destructible objects synced between players, and lookout spotting markers.
+- Milestone 5 (destructible objects in sync): done. Whoever breaks a fence, tree or wall tells the
+  server; everyone sees it break, late joiners get the list, and everything stands again at the
+  next match. (Lookout spotting was dropped: the lookout's job is just to look.)
+- Next: milestone 6, cheap cursed extras.

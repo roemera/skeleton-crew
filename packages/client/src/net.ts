@@ -75,6 +75,10 @@ export class Net {
     this.send({ t: 'hit', shell, target, zone, point });
   }
 
+  sendBreak(id: number) {
+    this.send({ t: 'break', id });
+  }
+
   sendState(s: TankState) {
     if (this.ws.readyState === WebSocket.OPEN) this.ws.send(encodeState(s));
   }
