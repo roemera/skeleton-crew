@@ -80,6 +80,22 @@ const GENERATORS: Record<SoundName, { seconds: number; gen: () => Gen }> = {
   },
 };
 
+/** What the crew is mumbling about. Each mood has its own pitch, speed and length. */
+export type Voice = 'grunt' | 'shout' | 'yep' | 'scream' | 'panic' | 'cheer' | 'wail';
+
+const MOODS: Record<Voice, { syllables: [number, number]; pitch: number; len: number; glide: number }> = {
+  grunt: { syllables: [1, 2], pitch: 0.8, len: 0.12, glide: -0.2 },
+  yep: { syllables: [1, 1], pitch: 1.2, len: 0.1, glide: 0.3 },
+  shout: { syllables: [2, 3], pitch: 1.1, len: 0.11, glide: 0.1 },
+  scream: { syllables: [3, 4], pitch: 1.7, len: 0.09, glide: 0.5 },
+  panic: { syllables: [5, 7], pitch: 1.5, len: 0.06, glide: 0.2 },
+  cheer: { syllables: [3, 4], pitch: 1.3, len: 0.12, glide: 0.4 },
+  wail: { syllables: [2, 2], pitch: 1.0, len: 0.45, glide: -0.6 },
+};
+
+// Vowel formants (F1, F2) in Hz: a, e, i, o, u.
+const VOWELS: Array<[number, number]> = [[800, 1200], [500, 1900], [300, 2300], [500, 900], [350, 800]];
+
 export interface Loop {
   setPosition(p: THREE.Vector3): void;
   setRate(rate: number): void;
@@ -197,6 +213,87 @@ export class Audio {
       delay = opts.pos.distanceTo(this.listenerPos) / SPEED_OF_SOUND;
     } else gain.connect(this.master);
     src.start(ctx.currentTime + delay);
+  }
+
+  /**
+   * Gibberish crew voice: buzzy syllables through two vowel formants, crushed. Cursed on purpose.
+   * `base` is this crew's pitch in Hz.
+   */
+  voice(mood: Voice, base = 150, volume = 0.9) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const m = MOODS[mood];
+    const out = ctx.createGain();
+    out.gain.value = volume;
+    const crusher = ctx.createWaveShaper();
+    crusher.curve = Float32Array.from({ length: 64 }, (_, i) => Math.round(((i / 63) * 2 - 1) * 4) / 4);
+    crusher.connect(out);
+    out.connect(this.master);
+    const n = m.syllables[0] + Math.floor(Math.random() * (m.syllables[1] - m.syllables[0] + 1));
+    let t = ctx.currentTime + 0.02;
+    for (let i = 0; i < n; i++) {
+      const len = m.len * (0.7 + Math.random() * 0.6);
+      const f0 = base * m.pitch * (0.85 + Math.random() * 0.3);
+      const osc = ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(f0, t);
+      osc.frequency.linearRampToValueAtTime(f0 * (1 + m.glide * (Math.random() + 0.3)), t + len);
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0, t);
+      env.gain.linearRampToValueAtTime(0.5, t + 0.015);
+      env.gain.setValueAtTime(0.5, t + len * 0.7);
+      env.gain.linearRampToValueAtTime(0, t + len);
+      const [f1, f2] = VOWELS[Math.floor(Math.random() * VOWELS.length)];
+      for (const f of [f1, f2]) {
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = f;
+        bp.Q.value = 6;
+        osc.connect(bp);
+        bp.connect(env);
+      }
+      env.connect(crusher);
+      osc.start(t);
+      osc.stop(t + len + 0.02);
+      t += len + 0.03 + Math.random() * 0.04;
+    }
+  }
+
+  /** Out-of-tune fanfare for the winner, sad trombone for everyone else. */
+  jingle(win: boolean) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const notes = win
+      ? [[523, 0.12], [659, 0.12], [784, 0.12], [1047, 0.5], [988, 0.12], [1047, 0.7]]
+      : [[392, 0.45], [370, 0.45], [349, 0.45], [330, 1.4]];
+    let t = ctx.currentTime + 0.05;
+    for (const [freq, len] of notes) {
+      const osc = ctx.createOscillator();
+      osc.type = win ? 'square' : 'sawtooth';
+      const detune = (Math.random() - 0.5) * 120; // cents: nobody tuned this
+      osc.frequency.setValueAtTime(freq, t);
+      osc.detune.setValueAtTime(detune, t);
+      if (!win && len > 1) {
+        // the wah-wah at the end
+        const lfo = ctx.createOscillator(), depth = ctx.createGain();
+        lfo.frequency.value = 6;
+        depth.gain.value = 18;
+        lfo.connect(depth);
+        depth.connect(osc.frequency);
+        lfo.start(t);
+        lfo.stop(t + len);
+      }
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0.0, t);
+      env.gain.linearRampToValueAtTime(0.25, t + 0.02);
+      env.gain.setValueAtTime(0.25, t + len * 0.8);
+      env.gain.linearRampToValueAtTime(0, t + len);
+      osc.connect(env);
+      env.connect(this.master);
+      osc.start(t);
+      osc.stop(t + len + 0.02);
+      t += len;
+    }
   }
 
   /** A looping sound (engines). Positional if `pos` is given. Safe to call before unlock. */

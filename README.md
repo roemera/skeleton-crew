@@ -84,4 +84,6 @@ packages/
 - Milestone 5 (destructible objects in sync): done. Whoever breaks a fence, tree or wall tells the
   server; everyone sees it break, late joiners get the list, and everything stands again at the
   next match. (Lookout spotting was dropped: the lookout's job is just to look.)
-- Next: milestone 6, cheap cursed extras.
+- Milestone 6 (cursed extras): done. Gibberish crew voice lines with subtitles (firing, loading,
+  crawling, getting hit, parts breaking, kills, dying), a jerky death camera circling your burning
+  wreck, and a flashing, shaking results screen with an out-of-tune fanfare or a sad trombone.

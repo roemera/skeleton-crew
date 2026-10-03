@@ -22,6 +22,17 @@ const CSS = `
 #menu li { padding: 3px 6px; margin: 3px 0; background: #2a0033; }
 #menu li.ready { color: #14001a; background: #b6ff00; }
 #menu .note { color: #00ffe1; font-size: 13px; margin-top: 10px; }
+/* Results: everything flashes and shakes, in steps so it stutters. */
+#menu.victory { animation: sc-bg 0.5s steps(2) infinite; }
+#menu.victory .box { animation: sc-jitter 0.25s steps(2) infinite; }
+#menu.victory h1 { font-size: 40px; transform: rotate(-4deg) scaleX(1.35); transform-origin: left;
+  animation: sc-flash 0.3s steps(2) infinite; }
+#menu.victory pre { margin: 0 0 6px; font: bold 18px/1 "Courier New", monospace; color: #ffe600;
+  animation: sc-spin 1.2s steps(6) infinite; display: inline-block; }
+@keyframes sc-bg { 0% { background: rgba(255,79,216,0.6); } 100% { background: rgba(0,255,225,0.45); } }
+@keyframes sc-jitter { 0% { transform: translate(-4px,2px) rotate(-1deg); } 100% { transform: translate(4px,-3px) rotate(1.5deg); } }
+@keyframes sc-flash { 0% { color: #ff4fd8; } 100% { color: #b6ff00; } }
+@keyframes sc-spin { 0% { transform: scaleX(1); } 50% { transform: scaleX(-1) skewY(8deg); } 100% { transform: scaleX(1); } }
 `;
 
 export type JoinChoice = { mode: 'offline' } | { mode: 'online'; server: string; name: string; password: string };
@@ -57,7 +68,7 @@ export class Menu {
 
   /** Ask how to play. Resolves when the player picks. */
   join(error = ''): Promise<JoinChoice> {
-    this.root.classList.remove('see-through');
+    this.root.classList.remove('see-through', 'victory');
     this.root.style.display = 'flex';
     this.root.innerHTML = `
       <form class="box">
@@ -91,6 +102,7 @@ export class Menu {
   /** Lobby: who's here and who's ready. */
   lobby(players: PlayerInfo[], phase: Phase, countdown: number, myId: number, onReady: (ready: boolean) => void, onStart: () => void) {
     this.root.classList.add('see-through');
+    this.root.classList.remove('victory');
     this.root.style.display = 'flex';
     const me = players.find((p) => p.id === myId);
     const status =
@@ -112,7 +124,7 @@ export class Menu {
 
   /** End of match: who won, the table, and how long until the lobby. */
   results(scores: Score[], winner: number, seconds: number, myId: number) {
-    this.root.classList.add('see-through');
+    this.root.classList.add('see-through', 'victory');
     this.root.style.display = 'flex';
     const name = scores.find((s) => s.id === winner)?.name ?? '???';
     const rows = scores
@@ -120,6 +132,7 @@ export class Menu {
       .join('');
     this.root.innerHTML = `
       <div class="box">
+        <pre>${winner === myId ? TROPHY : SKULL}</pre>
         <h1>${winner === myId ? 'YOU WIN. SOMEHOW.' : `${escape(name)} WINS`}</h1>
         <ul>${rows}</ul>
         <div class="note">BACK TO THE LOBBY IN <span class="secs">${seconds}</span>...</div>
@@ -137,6 +150,14 @@ export class Menu {
     this.root.style.display = 'none';
   }
 }
+
+const TROPHY = ` \\___/ 
+ (  $  )
+  \\_/
+  _|_`;
+const SKULL = `  ___
+ (x x)
+  |=|`;
 
 export function accuracy(s: Score) {
   return s.shots ? `${Math.round((100 * s.hits) / s.shots)}%` : '-';

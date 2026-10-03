@@ -17,7 +17,7 @@ import { Shells, type HitOutcome, type Shell, type ShellHit } from './sim/shells
 import type { ColliderRole } from './sim/tank';
 import { LoaderStation } from './ui/loader';
 import { Fx } from './fx';
-import { Audio } from './audio';
+import { Audio, type Voice } from './audio';
 import { Targets } from './targets';
 import { Remotes } from './remotes';
 import { Net } from './net';
@@ -126,6 +126,19 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
   let message: { text: string; color: string; until: number } | null = null;
   const say = (text: string, color: string) => (message = { text, color, until: time + MESSAGE_TIME });
 
+  // The crew (you) mumbles gibberish when things happen. Each game gets its own voice pitch.
+  const crewPitch = 110 + Math.random() * 90;
+  let lastVoice = -10;
+  let subtitle: { text: string; until: number } | null = null;
+  function crew(mood: Voice, urgent = false) {
+    if (!urgent && time - lastVoice < 0.6) return;
+    lastVoice = time;
+    audio.voice(mood, crewPitch);
+    const words = { grunt: 1, yep: 1, shout: 2, scream: 3, panic: 5, cheer: 3, wail: 2 }[mood];
+    const end = mood === 'scream' || mood === 'panic' || mood === 'cheer' || mood === 'shout' ? '!' : '...';
+    subtitle = { text: `CREW: ${gibberish(words)}${end}`, until: time + 1.8 };
+  }
+
   const shells = new Shells(physics, (shell, hit) => onShellHit(shell, hit));
 
   /** Which zone a hit on a tank is, from the collider it hit and the surface normal. */
@@ -178,6 +191,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
       if (res.destroyed) {
         text = `TARGET DESTROYED (${ZONE_LABEL[res.zone]})`;
         targets.destroy(target);
+        crew('cheer', true);
       }
       say(text, res.destroyed ? HUD_COLORS.lime : HUD_COLORS.yellow);
       lastHit = { zone: res.zone, damage: res.damage, broke: res.broke, destroyed: res.destroyed };
@@ -205,6 +219,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
     const shell = shells.spawn(pos, vel, tank.body);
     net?.sendFire(shell.id, arr(pos), arr(vel));
     tank.recoil(dir, RECOIL_IMPULSE);
+    crew('shout');
     fx.muzzleFlash(pos, dir);
     audio.play('cannon');
     setTimeout(() => audio.play('clank', { rate: 0.8 }), 350); // casing hits the floor
@@ -257,6 +272,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
         }
       } else if (msg.t === 'spawn') {
         dead = null;
+        wreck(model, false);
         protectedUntil = time + SPAWN_PROTECTION;
         const sp = map.spawns[msg.spawn];
         tank.teleport(sp, map.heightAt(sp.x, sp.z));
@@ -283,6 +299,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
           }
           hurtAt = time;
           audio.play('impact', { volume: 1.5, rate: 0.7 });
+          if (msg.health > 0) crew(msg.broke ? 'panic' : 'scream', true);
           say(`HIT BY ${nameOf(msg.attacker)}: ${what}`, HUD_COLORS.red);
         } else if (msg.attacker === net.id) {
           say(`HIT ${nameOf(msg.target)}: ${what}`, HUD_COLORS.yellow);
@@ -298,8 +315,11 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
           const p = tank.body.translation();
           fx.fire(new THREE.Vector3(p.x, p.y + 1.2, p.z), RESPAWN_DELAY);
           audio.play('explosion', { volume: 1.5 });
+          wreck(model, true);
+          crew('wail', true);
         } else {
           remotes.kill(msg.victim);
+          if (msg.killer === net.id) crew('cheer', true);
           const r = remotes.byId.get(msg.victim);
           if (r) fx.fire(r.model.root.position.clone().add(new THREE.Vector3(0, 1.2, 0)), RESPAWN_DELAY);
           say(msg.killer === net.id ? `YOU KILLED ${victim}` : `${killer} KILLED ${victim}`, msg.killer === net.id ? HUD_COLORS.lime : HUD_COLORS.white);
@@ -313,6 +333,9 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
         dead = null;
         input.unlock();
         menu.results(msg.scores, msg.winner, msg.seconds, net.id);
+        wreck(model, false);
+        audio.jingle(msg.winner === net.id);
+        crew(msg.winner === net.id ? 'cheer' : 'wail', true);
       }
     };
     net.onState = (st) => remotes.receive(st, time);
@@ -358,6 +381,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
       if (n >= 0 && seats.current !== SEATS[n] && !(seats.switching && seats.target === SEATS[n])) {
         seats.request(SEATS[n]);
         loader.cancel();
+        crew('grunt');
         // Grab the mouse now, while the key press still counts as a user gesture.
         if (SEATS[n] !== 'loader') input.lock();
         audio.play('crawl');
@@ -372,6 +396,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
         tank.damage.breakPart(part);
         tank.onPartBroken(part);
         say(`DEV: ${PART_LABEL[part]} BROKEN`, HUD_COLORS.red);
+        crew('panic', true);
       }
       if (seats.current === 'driver') {
         if (code === 'KeyW') tank.throttleUp();
@@ -405,7 +430,10 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
       case 'loader': {
         const ev = loader.update(input.mouseX, input.mouseY, input.mouseButtons.has(0), gun);
         if (ev === 'grab') audio.play('clank', { rate: 1.4, volume: 0.5 });
-        if (ev === 'loaded') audio.play('clank', { rate: 0.7 });
+        if (ev === 'loaded') {
+          audio.play('clank', { rate: 0.7 });
+          crew('yep');
+        }
         if (ev === 'rejected') say(gun.shellInBreech ? 'ALREADY LOADED' : 'BREECH IS CLOSED', HUD_COLORS.red);
         break;
       }
@@ -421,6 +449,19 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
   }
 
   function placeCamera(): { fov: number; zoom: string; viewHeading: number } {
+    if (dead) {
+      // Death camera: circle the burning wreck in jerky 12 fps steps.
+      model.root.visible = true;
+      camera.clearViewOffset();
+      const a = (Math.floor(time * 12) / 12) * 0.5;
+      camera.position.set(hullPos.x + Math.sin(a) * 14, hullPos.y + 6, hullPos.z + Math.cos(a) * 14);
+      camera.lookAt(hullPos);
+      if (camera.fov !== LOOKOUT_FOV) {
+        camera.fov = LOOKOUT_FOV;
+        camera.updateProjectionMatrix();
+      }
+      return { fov: LOOKOUT_FOV, zoom: '', viewHeading: 0 };
+    }
     model.root.visible = seats.current === 'lookout';
     // The driver's slit sits above screen centre: shift the view window so the horizon lands in it.
     if (seats.current === 'driver') camera.setViewOffset(RENDER_WIDTH, RENDER_HEIGHT, 0, DRIVER_SLIT_SHIFT, RENDER_WIDTH, RENDER_HEIGHT);
@@ -495,7 +536,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
     audio.setListener(camera);
     engine.setRate(0.6 + Math.abs(tank.speed) / 12);
     engine.setVolume(0.35);
-    const seesOutside = seats.current === 'driver' || seats.current === 'gunner' || seats.current === 'lookout';
+    const seesOutside = !!dead || seats.current === 'driver' || seats.current === 'gunner' || seats.current === 'lookout';
     if (seesOutside) pipeline.render(world.scene, camera);
     else pipeline.clear(0x000000);
 
@@ -517,6 +558,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
       dead: dead && { killer: dead.killer, zone: dead.zone, respawnIn: dead.until - time },
       protectedFor: Math.max(0, protectedUntil - time),
       hurt: Math.max(0, 1 - (time - hurtAt) / 0.6),
+      subtitle: subtitle && time < subtitle.until ? subtitle.text : null,
     });
     requestAnimationFrame(frame);
   }
@@ -541,6 +583,25 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
     get shotsFired() { return shotsFired; },
     get message() { return message; },
   };
+}
+
+const SYLLABLES = ['BLO', 'RK', 'GNA', 'HUP', 'ZO', 'KRA', 'MEE', 'OOG', 'FLA', 'TCH', 'NNG', 'WUB', 'SKO', 'PRT', 'GLUB', 'YAH'];
+/** Crew talk, as subtitled by someone who wasn't listening. */
+function gibberish(words: number) {
+  const pick = () => SYLLABLES[Math.floor(Math.random() * SYLLABLES.length)];
+  return Array.from({ length: words }, () => pick() + (Math.random() < 0.5 ? pick().toLowerCase() : '')).join(' ').toUpperCase();
+}
+
+const WRECK = new THREE.MeshLambertMaterial({ color: 0x110011 });
+/** Turn a tank model into a black wreck, or back. */
+function wreck(m: { root: THREE.Object3D }, on: boolean) {
+  m.root.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return;
+    if (on) {
+      o.userData.mat ??= o.material;
+      o.material = WRECK;
+    } else if (o.userData.mat) o.material = o.userData.mat;
+  });
 }
 
 function clamp(v: number, limit: number) {

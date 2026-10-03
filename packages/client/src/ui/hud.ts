@@ -42,6 +42,7 @@ export interface HudState {
   dead: { killer: string; zone: string; respawnIn: number } | null;
   protectedFor: number; // s of spawn protection left
   hurt: number; // 0..1 red flash after being hit
+  subtitle: string | null; // the crew's gibberish
 }
 
 export const HUD_COLORS = C;
@@ -73,12 +74,14 @@ export class Hud {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, W, H);
     const seat = s.seats.current;
-    if (seat === null) this.drawCrawl(s);
+    if (s.dead) {
+      // The death camera fills the screen; no seat view.
+    } else if (seat === null) this.drawCrawl(s);
     else if (seat === 'driver') this.drawDriver(s);
     else if (seat === 'gunner') this.drawGunner(s);
     else if (seat === 'loader') this.drawLoader(s);
     else this.drawLookout(s);
-    if (seat !== null) this.drawDamage(s);
+    if (seat !== null && !s.dead) this.drawDamage(s);
     if (s.hurt > 0) {
       ctx.fillStyle = `rgba(255,31,61,${(0.6 * s.hurt).toFixed(2)})`;
       for (const [x, y, w, h] of [[0, 0, W, 8], [0, H - 8, W, 8], [0, 0, 8, H], [W - 8, 0, 8, H]]) ctx.fillRect(x, y, w, h);
@@ -95,6 +98,12 @@ export class Hud {
       drawText(ctx, s.message.text, 240, 225, s.message.color, 1, 'center');
     }
     this.drawSeatBar(s);
+    if (s.subtitle && !s.dead) {
+      const w = s.subtitle.length * 4 + 6;
+      ctx.fillStyle = C.black;
+      ctx.fillRect(240 - w / 2, 236, w, 10);
+      drawText(ctx, s.subtitle, 240, 238, C.white, 1, 'center');
+    }
     if (s.dead) this.drawDead(s);
     if (s.scores) this.drawScores(s.scores, s.myId);
     if (!s.locked && seat !== 'loader') {
@@ -445,11 +454,12 @@ export class Hud {
     const ctx = this.ctx;
     const d = s.dead!;
     const f = Math.floor(s.time * 8);
-    ctx.fillStyle = f % 2 ? '#3a0008' : '#14001a';
+    // Translucent, so the death camera shows through.
+    ctx.fillStyle = f % 2 ? 'rgba(58,0,8,0.55)' : 'rgba(20,0,26,0.45)';
     ctx.fillRect(0, 0, W, H - 13);
     let seed = f * 9973;
     const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-    for (let i = 0; i < 900; i++) {
+    for (let i = 0; i < 400; i++) {
       ctx.fillStyle = rnd() < 0.5 ? C.red : C.pinkDark;
       ctx.fillRect(Math.floor(rnd() * W), Math.floor(rnd() * (H - 13)), 3, 1);
     }
