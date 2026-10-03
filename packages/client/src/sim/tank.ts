@@ -19,6 +19,7 @@ const MU_LONG = 1.0;
 const MU_LAT = 0.8;
 const ACCEL_MAX = 3; // m/s^2
 const BRAKE_MAX = 8; // m/s^2
+const AIM_LEAD = (3 * Math.PI) / 180; // rad: how far the mouse may get ahead of the turret
 
 /** Tank collision groups: member of group 3, collides with everything except debris (group 2). */
 export const TANK_GROUPS = 0x0004_fffd;
@@ -139,9 +140,14 @@ export class TankSim {
   }
 
   // --- Gunner ---
+  /**
+   * Mouse aiming. The command may only lead the actual turret/gun by AIM_LEAD, so flicking the mouse
+   * doesn't pile up a backlog: the turret stops soon after the mouse does, and reverses at once.
+   */
   aimBy(dYaw: number, dPitch: number) {
-    this.turretYawCmd += dYaw;
-    this.gunPitchCmd = Math.max(GUN_MIN_ELEVATION, Math.min(GUN_MAX_ELEVATION, this.gunPitchCmd + dPitch));
+    this.turretYawCmd = clampAround(this.turretYawCmd + dYaw, this.turretYaw, AIM_LEAD);
+    const pitch = clampAround(this.gunPitchCmd + dPitch, this.gunPitch, AIM_LEAD);
+    this.gunPitchCmd = Math.max(GUN_MIN_ELEVATION, Math.min(GUN_MAX_ELEVATION, pitch));
   }
 
   step(dt: number) {
@@ -299,6 +305,11 @@ export class TankSim {
     outPos.set(t.x, t.y, t.z);
     outQuat.set(r.x, r.y, r.z, r.w);
   }
+}
+
+/** Keep `v` within `lead` of `around`. */
+function clampAround(v: number, around: number, lead: number) {
+  return Math.max(around - lead, Math.min(around + lead, v));
 }
 
 function clamp(v: number, limit: number) {
