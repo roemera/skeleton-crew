@@ -1,0 +1,11 @@
+{
+  "name": "skeleton-crew",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "dev": "npm run dev -w @skeleton-crew/client",
+    "build": "npm run build -w @skeleton-crew/client",
+    "typecheck": "tsc -p packages/client --noEmit"
+  }
+}

@@ -1,0 +1,199 @@
+import RAPIER from '@dimforge/rapier3d-compat';
+import * as THREE from 'three';
+import {
+  GUN_ELEVATION_RATE, GUN_MAX_ELEVATION, GUN_MIN_ELEVATION, HULL_HALF, HULL_TURN_RATE, STEER_STEP,
+  TANK_MASS, THROTTLE_STEPS, TOP_SPEED_FORWARD, TOP_SPEED_REVERSE, TURRET_TURN_RATE, type Spawn,
+} from '@skeleton-crew/shared';
+
+// Suspension: 5 rays per side from the hull floor.
+const SUSP_X = 1.4;
+const SUSP_Z = [-2.6, -1.3, 0, 1.3, 2.6];
+const SUSP_LEN = 1.1; // m
+const SUSP_K = 75000; // N/m per point (~0.4 m sag at rest)
+const SUSP_C = 16000; // N*s/m per point
+// Track grip: how hard each grounded point pushes toward the commanded velocity.
+const GRIP_LONG = 3; // 1/s
+const GRIP_LAT = 10; // 1/s
+const MU_LONG = 1.0;
+const MU_LAT = 0.8;
+const ACCEL_MAX = 3; // m/s^2
+const BRAKE_MAX = 8; // m/s^2
+
+/** Tank collision groups: member of group 3, collides with everything except debris (group 2). */
+export const TANK_GROUPS = 0x0004_fffd;
+
+const v3 = () => new THREE.Vector3();
+
+export class TankSim {
+  readonly body: RAPIER.RigidBody;
+  readonly hullCollider: RAPIER.Collider;
+
+  // Driver levers: they stay where they were left (cruise control).
+  throttleIdx = THROTTLE_STEPS.indexOf(0);
+  steer = 0; // -1 (left) .. 1 (right)
+  brake = false;
+
+  // Turret: actual angles move toward commanded ones at fixed rates.
+  turretYaw = 0;
+  gunPitch = 0;
+  turretYawCmd = 0;
+  gunPitchCmd = 0;
+
+  // Read by visuals and HUD.
+  speed = 0; // m/s along hull forward
+  trackSpeed: [number, number] = [0, 0];
+  grounded = 0; // fraction of suspension points touching
+
+  private points: THREE.Vector3[] = [];
+  private tmp = { a: v3(), b: v3(), c: v3(), d: v3(), e: v3(), f: v3(), n: v3(), q: new THREE.Quaternion() };
+
+  constructor(private world: RAPIER.World, spawn: Spawn, groundY: number) {
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), spawn.rotY);
+    this.body = world.createRigidBody(
+      RAPIER.RigidBodyDesc.dynamic()
+        .setTranslation(spawn.x, groundY + 2.2, spawn.z)
+        .setRotation({ x: q.x, y: q.y, z: q.z, w: q.w })
+        .setCanSleep(false)
+        .setAngularDamping(0.6)
+        .setLinearDamping(0.05)
+        .setCcdEnabled(true),
+    );
+    const { x: hx, y: hy, z: hz } = HULL_HALF;
+    const m = TANK_MASS;
+    this.hullCollider = world.createCollider(
+      RAPIER.ColliderDesc.cuboid(hx, hy, hz)
+        .setMassProperties(
+          m,
+          { x: 0, y: -0.3, z: 0 },
+          { x: (m / 12) * (4 * hy * hy + 4 * hz * hz), y: (m / 12) * (4 * hx * hx + 4 * hz * hz), z: (m / 12) * (4 * hx * hx + 4 * hy * hy) },
+          { x: 0, y: 0, z: 0, w: 1 },
+        )
+        .setFriction(0.3)
+        .setCollisionGroups(TANK_GROUPS)
+        .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
+      this.body,
+    );
+    world.createCollider(
+      RAPIER.ColliderDesc.cuboid(1.1, 0.45, 1.4).setTranslation(0, hy + 0.45, 0.4).setDensity(0).setFriction(0.3).setCollisionGroups(TANK_GROUPS),
+      this.body,
+    );
+    for (const x of [-SUSP_X, SUSP_X]) for (const z of SUSP_Z) this.points.push(new THREE.Vector3(x, -hy, z));
+  }
+
+  get throttle() {
+    return THROTTLE_STEPS[this.throttleIdx];
+  }
+
+  // --- Driver levers ---
+  throttleUp() {
+    this.throttleIdx = Math.min(THROTTLE_STEPS.length - 1, this.throttleIdx + 1);
+  }
+  throttleDown() {
+    this.throttleIdx = Math.max(0, this.throttleIdx - 1);
+  }
+  steerBy(dir: -1 | 1) {
+    this.steer = Math.max(-1, Math.min(1, this.steer + dir * STEER_STEP));
+  }
+  centreSteer() {
+    this.steer = 0;
+  }
+
+  // --- Gunner ---
+  aimBy(dYaw: number, dPitch: number) {
+    this.turretYawCmd += dYaw;
+    this.gunPitchCmd = Math.max(GUN_MIN_ELEVATION, Math.min(GUN_MAX_ELEVATION, this.gunPitchCmd + dPitch));
+  }
+
+  step(dt: number) {
+    this.stepTurret(dt);
+    this.stepDrive(dt);
+  }
+
+  private stepTurret(dt: number) {
+    const dy = this.turretYawCmd - this.turretYaw;
+    this.turretYaw += Math.sign(dy) * Math.min(Math.abs(dy), TURRET_TURN_RATE * dt);
+    const dp = this.gunPitchCmd - this.gunPitch;
+    this.gunPitch += Math.sign(dp) * Math.min(Math.abs(dp), GUN_ELEVATION_RATE * dt);
+  }
+
+  private stepDrive(dt: number) {
+    const { a: pos, b: fwd, c: up, d: tmp, e: rel, f: vdes, n: normal, q } = this.tmp;
+    const body = this.body;
+    const t = body.translation(), r = body.rotation();
+    q.set(r.x, r.y, r.z, r.w);
+    const com = body.worldCom();
+    const lin = body.linvel();
+    up.set(0, 1, 0).applyQuaternion(q);
+    fwd.set(0, 0, -1).applyQuaternion(q);
+    this.speed = lin.x * fwd.x + lin.y * fwd.y + lin.z * fwd.z;
+
+    const throttle = this.throttle;
+    const vTarget = this.brake ? 0 : throttle >= 0 ? throttle * TOP_SPEED_FORWARD : throttle * TOP_SPEED_REVERSE;
+    // Turning right = clockwise from above = negative yaw rate.
+    const yawTarget = this.brake ? 0 : -this.steer * HULL_TURN_RATE;
+    const aMax = this.brake || Math.abs(vTarget) < Math.abs(this.speed) ? BRAKE_MAX : ACCEL_MAX;
+
+    const ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: -up.x, y: -up.y, z: -up.z });
+    const mPer = TANK_MASS / this.points.length;
+    let grounded = 0;
+    const sideSpeed = [0, 0], sideCount = [0, 0];
+
+    for (let i = 0; i < this.points.length; i++) {
+      pos.copy(this.points[i]).applyQuaternion(q).add(tmp.set(t.x, t.y, t.z));
+      ray.origin = { x: pos.x, y: pos.y, z: pos.z };
+      const hit = this.world.castRayAndGetNormal(ray, SUSP_LEN, true, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, TANK_GROUPS, undefined, body);
+      if (!hit) continue;
+      grounded++;
+      const toi = hit.timeOfImpact;
+      normal.set(hit.normal.x, hit.normal.y, hit.normal.z);
+      const contact = { x: pos.x - up.x * toi, y: pos.y - up.y * toi, z: pos.z - up.z * toi };
+      const vel = body.velocityAtPoint(contact);
+
+      // Spring + damper along the ground normal.
+      const vN = vel.x * normal.x + vel.y * normal.y + vel.z * normal.z;
+      const load = Math.max(0, SUSP_K * (SUSP_LEN - toi) - SUSP_C * vN);
+      body.applyImpulseAtPoint({ x: normal.x * load * dt, y: normal.y * load * dt, z: normal.z * load * dt }, pos, true);
+
+      // Ground-plane axes at this point.
+      const f = tmp.copy(fwd).addScaledVector(normal, -fwd.dot(normal)).normalize();
+      const fx = f.x, fy = f.y, fz = f.z;
+      const right = new THREE.Vector3(fx, fy, fz).cross(normal); // f x n = right
+
+      // Commanded velocity of the ground under this point: forward speed + hull rotation.
+      // This gives skid steering for free: the outer track runs faster than the inner one.
+      rel.set(contact.x - com.x, contact.y - com.y, contact.z - com.z);
+      vdes.set(fx * vTarget, fy * vTarget, fz * vTarget).add(new THREE.Vector3().copy(normal).multiplyScalar(yawTarget).cross(rel));
+      const dvx = vdes.x - vel.x, dvy = vdes.y - vel.y, dvz = vdes.z - vel.z;
+      const dLong = dvx * fx + dvy * fy + dvz * fz;
+      const dLat = dvx * right.x + dvy * right.y + dvz * right.z;
+      const fLong = clamp(dLong * mPer * GRIP_LONG, Math.min(MU_LONG * load, aMax * mPer));
+      const fLat = clamp(dLat * mPer * GRIP_LAT, MU_LAT * load);
+      body.applyImpulseAtPoint(
+        {
+          x: (fx * fLong + right.x * fLat) * dt,
+          y: (fy * fLong + right.y * fLat) * dt,
+          z: (fz * fLong + right.z * fLat) * dt,
+        },
+        contact,
+        true,
+      );
+
+      const side = this.points[i].x < 0 ? 0 : 1;
+      sideSpeed[side] += vel.x * fx + vel.y * fy + vel.z * fz;
+      sideCount[side]++;
+    }
+    this.grounded = grounded / this.points.length;
+    for (const s of [0, 1]) this.trackSpeed[s] = sideCount[s] ? sideSpeed[s] / sideCount[s] : this.trackSpeed[s] * 0.95;
+  }
+
+  /** Hull pose for rendering. */
+  pose(outPos: THREE.Vector3, outQuat: THREE.Quaternion) {
+    const t = this.body.translation(), r = this.body.rotation();
+    outPos.set(t.x, t.y, t.z);
+    outQuat.set(r.x, r.y, r.z, r.w);
+  }
+}
+
+function clamp(v: number, limit: number) {
+  return v > limit ? limit : v < -limit ? -limit : v;
+}
