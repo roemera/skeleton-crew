@@ -84,6 +84,11 @@ export class Menu {
     field('server').value = store.get('server') || location.host;
     field('name').value = store.get('name') || 'TANK' + Math.floor(Math.random() * 100);
     field('password').value = store.get('password');
+    // Remember every field as it's typed (and the generated name), not only on CLIMB IN.
+    for (const n of ['server', 'name', 'password']) {
+      store.set(n, field(n).value);
+      field(n).addEventListener('input', () => store.set(n, n === 'password' ? field(n).value : field(n).value.trim()));
+    }
     form.querySelector('.error')!.textContent = error;
     return new Promise((resolve) => {
       form.addEventListener('submit', (e) => {
