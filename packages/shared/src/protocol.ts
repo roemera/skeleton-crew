@@ -17,7 +17,8 @@ export interface PlayerInfo {
 
 export type ClientMsg =
   | { t: 'hello'; name: string; password: string; version: number }
-  | { t: 'ready'; ready: boolean };
+  | { t: 'ready'; ready: boolean }
+  | { t: 'start' }; // anyone in the lobby can start the match now
 
 export type ServerMsg =
   | { t: 'welcome'; id: number; seed: number; players: PlayerInfo[]; phase: Phase; spawn: number }

@@ -61,6 +61,10 @@ export class Net {
     this.send({ t: 'ready', ready });
   }
 
+  startMatch() {
+    this.send({ t: 'start' });
+  }
+
   sendState(s: TankState) {
     if (this.ws.readyState === WebSocket.OPEN) this.ws.send(encodeState(s));
   }

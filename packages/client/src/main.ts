@@ -193,7 +193,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
   let sendTimer = 0;
   if (net && remotes) {
     const showLobby = (players: Parameters<Menu['lobby']>[0], countdown: number) =>
-      menu.lobby(players, phase, countdown, net.id, (ready) => net.setReady(ready));
+      menu.lobby(players, phase, countdown, net.id, (ready) => net.setReady(ready), () => net.startMatch());
     if (phase !== 'live') showLobby(welcome!.players, 0);
     else menu.hide();
     net.onMessage = (msg) => {

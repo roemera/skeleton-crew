@@ -89,7 +89,7 @@ export class Menu {
   }
 
   /** Lobby: who's here and who's ready. */
-  lobby(players: PlayerInfo[], phase: Phase, countdown: number, myId: number, onReady: (ready: boolean) => void) {
+  lobby(players: PlayerInfo[], phase: Phase, countdown: number, myId: number, onReady: (ready: boolean) => void, onStart: () => void) {
     this.root.classList.add('see-through');
     this.root.style.display = 'flex';
     const me = players.find((p) => p.id === myId);
@@ -97,16 +97,17 @@ export class Menu {
       phase === 'countdown'
         ? `STARTING IN ${countdown}...`
         : players.length < 2
-          ? 'WAITING FOR MORE TANKS (OR THE HOST TYPES START)'
-          : 'STARTS WHEN EVERYONE IS READY';
+          ? 'WAITING FOR MORE TANKS, OR PRESS START NOW'
+          : 'STARTS WHEN EVERYONE IS READY, OR WHEN ANYONE PRESSES START NOW';
     this.root.innerHTML = `
       <div class="box">
         <h1>LOBBY</h1>
         <ul>${players.map((p) => `<li class="${p.ready ? 'ready' : ''}">${p.id === myId ? '&gt; ' : ''}${escape(p.name)}${p.ready ? ' - READY' : ''}</li>`).join('')}</ul>
         <div class="note">${status}</div>
-        ${phase === 'lobby' ? `<button>${me?.ready ? 'NOT READY' : 'READY'}</button>` : ''}
+        ${phase === 'lobby' ? `<button class="ready">${me?.ready ? 'NOT READY' : 'READY'}</button><button class="alt start">START NOW</button>` : ''}
       </div>`;
-    this.root.querySelector('button')?.addEventListener('click', () => onReady(!me?.ready));
+    this.root.querySelector('button.ready')?.addEventListener('click', () => onReady(!me?.ready));
+    this.root.querySelector('button.start')?.addEventListener('click', onStart);
   }
 
   hide() {

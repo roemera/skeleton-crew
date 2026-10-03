@@ -19,12 +19,12 @@ npm start                                            # builds the game, serves i
 
 Everyone opens `http://<host ip>:8080`, enters a name and the password, and clicks READY.
 The match starts when everyone (2+) is ready, or when the host types `start` in the server console
-(works solo). Forward TCP port 8080 on the host's router for players outside your network.
+(works solo); any player can also press START NOW in the lobby. Forward TCP port 8080 on the host's router for players outside your network.
 `PORT`, `PASSWORD` and `MAP_SEED` environment variables override the config file.
 
 **Developing:** `npm run dev` starts the game server (port 8080) and the Vite dev server together,
 then open http://localhost:5173 (Vite forwards the game connection to 8080). Without a
-server.config.json the password is `changeme`. Type `start` in that terminal to begin a match solo;
+server.config.json the password is `changeme`. Press START NOW in the lobby (or type `start` in that terminal) to begin, even solo;
 Ctrl+C stops both. PRACTICE OFFLINE on the join screen gives the single-player range with targets.
 
 `npm run dev` and `npm run build` first run `scripts/ensure-native.mjs`, which installs Vite's native

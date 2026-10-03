@@ -60,6 +60,9 @@ wss.on('connection', (ws: WebSocket, req) => {
       console.log(`[join] #${player.id} ${player.name} from ${addr} (${match.players.size} playing)`);
     } else if (msg.t === 'ready' && player) {
       match.setReady(player.id, msg.ready);
+    } else if (msg.t === 'start' && player) {
+      console.log(`[start] #${player.id} ${player.name} started the match`);
+      match.forceStart();
     }
   });
 
