@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { DESTRUCT_SPEED, FOG_FAR, type GameMap, type MapObject, makeRng } from '@skeleton-crew/shared';
+import { DESTRUCT_SPEED, FOG_FAR, FOG_NEAR, type GameMap, type MapObject, makeRng } from '@skeleton-crew/shared';
 import { tex } from './render/textures';
 import { wobble } from './render/pipeline';
 
@@ -37,7 +37,7 @@ export class World {
 
   constructor(readonly map: GameMap, readonly physics: RAPIER.World) {
     this.scene.background = new THREE.Color(SKY);
-    this.scene.fog = new THREE.Fog(FOG, 40, FOG_FAR);
+    this.scene.fog = new THREE.Fog(FOG, FOG_NEAR, FOG_FAR);
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0xff3df2, 1.6));
     const sun = new THREE.DirectionalLight(0xfff27a, 2.2);
     sun.position.set(0.4, 1, 0.25);

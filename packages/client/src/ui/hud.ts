@@ -204,7 +204,6 @@ export class Hud {
       const drop = (9.81 * m) / (2 * 600 * 600); // small-angle shell drop, rad
       const y = Math.round(cy + drop * pxPerRad) + 8;
       ctx.fillRect(cx - 3, y, 7, 1);
-      drawText(ctx, String(m / 100), cx + 6, y - 2, C.black);
     }
 
     // Commanded aim (turret lags behind the mouse at 24 deg/s).

@@ -1,7 +1,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import {
-  BARREL_LENGTH, TankDamage, type Part,
+  BARREL_LENGTH, GRAVITY, TankDamage, type Part,
   GUN_ELEVATION_RATE, GUN_MAX_ELEVATION, GUN_MIN_ELEVATION, HULL_HALF, HULL_TURN_RATE, STEER_STEP,
   TANK_MASS, THROTTLE_STEPS, TOP_SPEED_FORWARD, TOP_SPEED_REVERSE, TURRET_TURN_RATE, type Spawn,
 } from '@skeleton-crew/shared';
@@ -270,7 +270,10 @@ export class TankSim {
       const dvx = vdes.x - vel.x, dvy = vdes.y - vel.y, dvz = vdes.z - vel.z;
       const dLong = dvx * fx + dvy * fy + dvz * fz;
       const dLat = dvx * right.x + dvy * right.y + dvz * right.z;
-      const fLong = clamp(dLong * mPer * GRIP_LONG, Math.min(MU_LONG * load, aMax * mPer));
+      // Engine power cancels gravity along the slope (fy > 0 = facing uphill), so hills cost little speed.
+      // A broken engine only manages a quarter of it. Track grip still limits what you can climb.
+      const slopeAccel = GRAVITY * fy * engine;
+      const fLong = clamp(dLong * mPer * GRIP_LONG + slopeAccel * mPer, Math.min(MU_LONG * load, (aMax + Math.abs(slopeAccel)) * mPer));
       const fLat = clamp(dLat * mPer * GRIP_LAT, MU_LAT * load);
       body.applyImpulseAtPoint(
         {

@@ -3,14 +3,15 @@ import * as THREE from 'three';
 // Cheap, loud effects. Animation is quantised to 12 steps per second so it stutters.
 
 const STEP = 1 / 12;
-const basic = (color: number) => new THREE.MeshBasicMaterial({ color, fog: true });
+// No fog on effects: the acid-green fog turned yellow flashes green. Fire is red, smoke is black.
+const basic = (color: number) => new THREE.MeshBasicMaterial({ color, fog: false });
 const MAT = {
-  flash: basic(0xfff23a),
-  hot: basic(0xff2fa8),
-  smoke: basic(0x2a0033),
-  smokeLight: basic(0xb06bff),
-  tracer: basic(0xffffaa),
-  fire: basic(0xff6a00),
+  flash: basic(0xff1a00),
+  hot: basic(0xff6a00),
+  smoke: basic(0x0a0006),
+  smokeLight: basic(0x1a1a1a),
+  tracer: basic(0xff3a1a),
+  fire: basic(0xff3000),
 };
 const SPHERE = new THREE.IcosahedronGeometry(1, 0);
 const CONE = new THREE.ConeGeometry(0.6, 1.6, 5);
@@ -32,11 +33,13 @@ export class Fx {
     const flash = new THREE.Mesh(SPHERE, MAT.flash);
     flash.position.copy(pos);
     this.add(flash, 0.35, (e, t) => e.obj.scale.setScalar(size * (1 + t * 14)));
-    for (let i = 0; i < 5; i++) {
-      const puff = new THREE.Mesh(SPHERE, i % 2 ? MAT.smoke : MAT.hot);
+    // A short orange fireball, then black smoke that hangs around.
+    for (let i = 0; i < 6; i++) {
+      const fireball = i < 2;
+      const puff = new THREE.Mesh(SPHERE, fireball ? MAT.hot : MAT.smoke);
       const drift = new THREE.Vector3(Math.random() - 0.5, 0.8 + Math.random(), Math.random() - 0.5).multiplyScalar(2.5 * size);
       puff.position.copy(pos);
-      this.add(puff, 1.6 + Math.random(), (e, t) => {
+      this.add(puff, fireball ? 0.45 : 1.8 + Math.random(), (e, t) => {
         e.obj.position.copy(pos).addScaledVector(drift, t);
         e.obj.scale.setScalar(size * (1 + t * 2.5) * Math.max(0, 1 - t / e.life));
         e.obj.rotation.set(t * 3, t * 2, 0);

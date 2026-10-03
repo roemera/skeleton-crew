@@ -58,22 +58,27 @@ export const tex = {
     }),
   hull: () =>
     canvasTexture(32, 4, (ctx, s, r) => {
-      ctx.fillStyle = '#ff2fa8';
+      // Magenta (green's opposite) with black bands: tanks must pop against the grass.
+      ctx.fillStyle = '#ff00b4';
       ctx.fillRect(0, 0, s, s);
-      ctx.fillStyle = '#ffe600';
-      ctx.fillRect(0, 12, s, 4);
-      ctx.fillStyle = '#7a0050';
+      ctx.fillStyle = '#14001a';
+      ctx.fillRect(0, 10, s, 6);
+      ctx.fillRect(0, 26, s, 3);
+      ctx.fillStyle = '#ffffff';
       for (let i = 0; i < 6; i++) ctx.fillRect(Math.floor(r() * s), Math.floor(r() * s), 2, 2); // rivets
-      speckle(ctx, s, r, ['#ff79c9', '#c8007a'], 40);
+      speckle(ctx, s, r, ['#ff79c9', '#9a006c'], 30);
     }),
   turret: () =>
     canvasTexture(32, 5, (ctx, s, r) => {
-      ctx.fillStyle = '#9dff00';
+      // White turret: the brightest thing on the field.
+      ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, s, s);
-      ctx.fillStyle = '#ff2fa8';
+      ctx.fillStyle = '#ff00b4';
       ctx.font = 'bold 10px monospace';
       ctx.fillText('666', 4, 20);
-      speckle(ctx, s, r, ['#3d7a00', '#e8ff1a'], 50);
+      ctx.fillStyle = '#14001a';
+      ctx.fillRect(0, 26, s, 4);
+      speckle(ctx, s, r, ['#c9c9c9', '#ff79c9'], 40);
     }),
   track: () =>
     canvasTexture(16, 6, (ctx, s) => {

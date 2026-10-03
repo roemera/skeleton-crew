@@ -28,7 +28,8 @@ export const SPOT_MARKER_LIFETIME = 20; // s
 // World
 export const MAP_SIZE = 1000; // m, square, centred on the origin
 export const MAP_CELLS = 128; // height grid cells per side
-export const FOG_FAR = 300; // m
+export const FOG_NEAR = 80; // m: fog starts
+export const FOG_FAR = 450; // m: nothing visible beyond
 export const DESTRUCT_SPEED = 3; // m/s, tank speed that breaks fences and trees
 
 // Rendering
