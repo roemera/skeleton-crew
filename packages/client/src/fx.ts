@@ -6,7 +6,8 @@ const STEP = 1 / 12;
 // No fog on effects: the acid-green fog turned yellow flashes green. Fire is red, smoke is black.
 const basic = (color: number) => new THREE.MeshBasicMaterial({ color, fog: false });
 const MAT = {
-  flash: basic(0xff1a00),
+  flash: basic(0xff1a00), // hits
+  muzzle: basic(0xffffff), // firing
   hot: basic(0xff6a00),
   smoke: basic(0x0a0006),
   smokeLight: basic(0x1a1a1a),
@@ -48,7 +49,7 @@ export class Fx {
   }
 
   muzzleFlash(pos: THREE.Vector3, dir: THREE.Vector3) {
-    const flash = new THREE.Mesh(SPHERE, MAT.flash);
+    const flash = new THREE.Mesh(SPHERE, MAT.muzzle);
     flash.position.copy(pos).addScaledVector(dir, 1);
     this.add(flash, 0.15, (e, t) => e.obj.scale.set(1.2, 1.2, 1.2).multiplyScalar(1 + t * 8));
     // Smoke blows off to the sides quickly so the gunner can see the shell land.
