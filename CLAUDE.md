@@ -22,6 +22,6 @@ Design doc: https://claude.ai/code/artifact/6ed43f7e-4ee7-4297-b6c4-ff1759a31cf7
   `npm run typecheck` enforces this.
 - Tuning numbers live in `packages/shared/src/constants.ts` and `hitzones.ts`.
 - Check: `npm run typecheck` and `npm run build`.
-- Run: `npm run server` + `npm run dev`; `?test&offline` for headless single-player checks,
+- Run: `npm run dev` (game server + Vite together; default password `changeme`); `?test&offline` for headless single-player checks,
   `?test&join=localhost:5173&name=A&password=pw` for multiplayer ones (hides the click-to-play
   panel). `window.__game` exposes the tank, gun, targets, `fire()` and `aimAt()` for scripted tests.

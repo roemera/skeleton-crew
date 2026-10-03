@@ -41,7 +41,7 @@ export class Net {
         const hello: ClientMsg = { t: 'hello', name, password, version: PROTOCOL_VERSION };
         ws.send(JSON.stringify(hello));
       });
-      ws.addEventListener('error', () => fail(`can't reach ${host}`));
+      ws.addEventListener('error', () => fail(`can't reach the game server at ${host}. Is it running?`));
       const first = (e: MessageEvent) => {
         if (typeof e.data !== 'string') return;
         ws.removeEventListener('message', first);

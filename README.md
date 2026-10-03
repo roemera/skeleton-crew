@@ -22,9 +22,10 @@ The match starts when everyone (2+) is ready, or when the host types `start` in 
 (works solo). Forward TCP port 8080 on the host's router for players outside your network.
 `PORT`, `PASSWORD` and `MAP_SEED` environment variables override the config file.
 
-**Developing:** run `npm run server` in one terminal and `npm run dev` in another, then open
-http://localhost:5173 (Vite proxies the WebSocket to the server on 8080). PRACTICE OFFLINE on the
-join screen gives the single-player range with target tanks.
+**Developing:** `npm run dev` starts the game server (port 8080) and the Vite dev server together,
+then open http://localhost:5173 (Vite forwards the game connection to 8080). Without a
+server.config.json the password is `changeme`. Type `start` in that terminal to begin a match solo;
+Ctrl+C stops both. PRACTICE OFFLINE on the join screen gives the single-player range with targets.
 
 `npm run dev` and `npm run build` first run `scripts/ensure-native.mjs`, which installs Vite's native
 binaries for your platform if npm skipped them (a known npm bug that shows up on Windows as

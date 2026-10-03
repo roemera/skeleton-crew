@@ -7,7 +7,9 @@
   ],
   "scripts": {
     "predev": "node scripts/ensure-native.mjs",
-    "dev": "npm run dev -w @skeleton-crew/client",
+    "dev": "node scripts/dev.mjs",
+    "predev:client": "node scripts/ensure-native.mjs",
+    "dev:client": "npm run dev -w @skeleton-crew/client",
     "server": "node packages/server/src/main.ts",
     "prebuild": "node scripts/ensure-native.mjs",
     "build": "npm run build -w @skeleton-crew/client",
