@@ -1,6 +1,6 @@
 // Starting tuning values from the design doc. Change after playtesting.
 
-export const SEAT_SWITCH_TIME = 1.0; // s, same for every seat
+export const SEAT_SWITCH_TIME = 0.6; // s, same for every seat
 
 // Driving
 export const TOP_SPEED_FORWARD = 12; // m/s

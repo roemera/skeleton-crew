@@ -1,7 +1,7 @@
 # Skeleton Crew
 
 A browser tank game where you are the whole crew: driver, gunner, loader and lookout, one seat at a time.
-Switching seats takes 1 second. Design doc: https://claude.ai/code/artifact/6ed43f7e-4ee7-4297-b6c4-ff1759a31cf7
+Switching seats takes 0.6 seconds. Design doc: https://claude.ai/code/artifact/6ed43f7e-4ee7-4297-b6c4-ff1759a31cf7
 
 Stack: TypeScript, Three.js, Rapier (WebAssembly physics), Vite. Everything (map, models, textures) is generated in code.
 
@@ -38,7 +38,7 @@ URL options: `?offline` skips the menu, `?join=host:port&name=X&password=Y` join
 
 | Seat | Controls |
 | --- | --- |
-| Any | 1 Driver, 2 Gunner, 3 Loader, 4 Lookout (1 s crawl, you control nothing meanwhile), hold Tab for the scoreboard |
+| Any | 1 Driver, 2 Gunner, 3 Loader, 4 Lookout (0.6 s crawl, you control nothing meanwhile), hold Tab for the scoreboard |
 | Driver | W/S throttle lever (R full, R 1/2, stop, 1/4, 1/2, full), A/D steering lever, X centre, Space brake (held) |
 | Gunner | Mouse aims (turret follows at 24 deg/s), left click fires, right click 2x/4x zoom, Shift fine aim |
 | Loader | Free cursor: drag a shell from the rack into the open breech, Space opens/closes the breech |

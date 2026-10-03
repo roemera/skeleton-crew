@@ -403,30 +403,23 @@ export class Hud {
   }
 
   // --- Crawling between seats: stuttering neon tunnel ---
+  /** Crawling between seats: nearly black, a few faint pipes sliding past, quiet text. */
   private drawCrawl(s: HudState) {
     const ctx = this.ctx;
-    const f = Math.floor(s.time * 12); // 12 fps stutter
-    ctx.fillStyle = C.black;
+    ctx.fillStyle = '#07000a';
     ctx.fillRect(0, 0, W, H);
-    const colors = [C.pink, C.lime, C.yellow, C.cyan, C.purple];
-    for (let i = 0; i < 14; i++) {
-      const y = ((i * 37 + f * 9) % (H + 40)) - 20;
-      const jitter = ((f * 7 + i * 13) % 9) - 4;
-      ctx.fillStyle = colors[(i + f) % colors.length];
-      ctx.fillRect(0, y + jitter, W, 6 + (i % 3) * 4);
+    // Dim pipes drifting by, so it still reads as moving through the tank.
+    const drift = s.seats.progress * 60;
+    ctx.fillStyle = '#1a0624';
+    for (let i = 0; i < 5; i++) {
+      const y = ((i * 61 + drift * (1 + (i % 2))) % (H + 20)) - 10;
+      ctx.fillRect(0, Math.round(y), W, 3 + (i % 2) * 2);
     }
-    // a hand reaching forward
-    const hx = 200 + ((f * 5) % 11) - 5, hy = 160 + ((f * 3) % 7);
-    ctx.fillStyle = '#ffd0b0';
-    ctx.fillRect(hx, hy, 50, 26);
-    for (let k = 0; k < 4; k++) ctx.fillRect(hx + 50, hy + k * 7, 18, 5);
-    ctx.fillStyle = C.black;
-    ctx.fillRect(110, 100, 260, 40);
-    drawText(ctx, 'CRAWLING TO ' + SEAT_LABEL[s.seats.target], 240, 106, C.yellow, 2, 'center');
-    ctx.fillStyle = C.purple;
-    ctx.fillRect(130, 126, 220, 8);
-    ctx.fillStyle = C.lime;
-    ctx.fillRect(130, 126, Math.round(220 * s.seats.progress), 8);
+    drawText(ctx, '> ' + SEAT_LABEL[s.seats.target], 240, 126, '#7a5a8a', 1, 'center');
+    ctx.fillStyle = '#1a0624';
+    ctx.fillRect(200, 136, 80, 2);
+    ctx.fillStyle = '#5a3a6a';
+    ctx.fillRect(200, 136, Math.round(80 * s.seats.progress), 2);
   }
 
   private drawSeatBar(s: HudState) {
