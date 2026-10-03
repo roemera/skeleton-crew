@@ -240,6 +240,7 @@ export class Hud {
           ? ['LOADED, BREECH OPEN', C.yellow]
           : ['EMPTY - GO LOAD', C.red];
     drawText(ctx, status, 380, 234, color);
+    drawText(ctx, 'MMB MACHINE GUN', 380, 244, C.cyan);
     if (s.tank.isBroken('optics')) this.drawStatic(cx - r, cy - r, r * 2, r * 2, s.time);
   }
 
@@ -499,7 +500,7 @@ export class Hud {
     const help = [
       '1-4 CHANGE SEAT (2 SECONDS, ANY SEAT)',
       'DRIVER: W/S THROTTLE  A/D STEER  X CENTRE  SPACE BRAKE',
-      'GUNNER: MOUSE AIM  LMB FIRE  RMB ZOOM  SHIFT FINE',
+      'GUNNER: MOUSE AIM  LMB CANNON  MMB MACHINE GUN  RMB ZOOM',
       'LOADER: DRAG A SHELL INTO THE BREECH  SPACE OPENS/CLOSES',
       'LOOKOUT: MOUSE LOOK  RMB BINOCULARS',
     ];

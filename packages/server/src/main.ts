@@ -40,7 +40,10 @@ wss.on('connection', (ws: WebSocket, req) => {
       if (bytes.byteLength !== STATE_BYTES) return;
       bytes[1] = player.id;
       const s = decodeState(bytes);
-      if (s) player.pos = s.pos;
+      if (s) {
+        player.pos = s.pos;
+        player.seat = s.seat;
+      }
       for (const other of wss.clients) if (other !== ws && other.readyState === other.OPEN && (other as Tagged).playerId) other.send(bytes);
       return;
     }

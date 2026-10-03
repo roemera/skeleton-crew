@@ -2,7 +2,7 @@ import type { HitZone, Part } from './hitzones.ts';
 
 // Network messages. Rare messages are JSON; the 20 Hz tank state is a 52-byte binary packet.
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 export const DEFAULT_PORT = 8080;
 export const STATE_HZ = 20;
 export const MAX_PLAYERS = 8;
@@ -32,7 +32,7 @@ export type ClientMsg =
   | { t: 'hello'; name: string; password: string; version: number }
   | { t: 'ready'; ready: boolean }
   | { t: 'start' } // anyone in the lobby can start the match now
-  | { t: 'fire'; shell: number; pos: Vec3; vel: Vec3 }
+  | { t: 'fire'; shell: number; pos: Vec3; vel: Vec3; mg?: boolean } // mg: a machine-gun bullet
   | { t: 'hit'; shell: number; target: number; zone: HitZone; point: Vec3 } // shooter-detected
   | { t: 'break'; id: number }; // I broke this map object (fence, tree, wall)
 
@@ -42,7 +42,7 @@ export type ServerMsg =
   | { t: 'lobby'; players: PlayerInfo[]; phase: Phase; countdown: number }
   | { t: 'spawn'; spawn: number } // go to this spawn point now (match start)
   | { t: 'left'; id: number }
-  | { t: 'fire'; from: number; shell: number; pos: Vec3; vel: Vec3 }
+  | { t: 'fire'; from: number; shell: number; pos: Vec3; vel: Vec3; mg?: boolean }
   | { t: 'damage'; target: number; attacker: number; zone: HitZone; damage: number; health: number; broke: Part | null; point: Vec3 }
   | { t: 'kill'; victim: number; killer: number; zone: HitZone; scores: Score[] }
   | { t: 'respawn'; id: number } // that player's tank is back (clear its wreck)

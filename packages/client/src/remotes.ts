@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { INTERP_DELAY, SEAT_CODES, type TankState } from '@skeleton-crew/shared';
 import { TankSim } from './sim/tank';
-import { buildTankModel, TRACK_TEXTURE_LENGTH, type TankModel } from './models/tank';
+import { buildTankModel, MAN_CENTER, MAN_HALF, TRACK_TEXTURE_LENGTH, type TankModel } from './models/tank';
 import type { Audio, Loop } from './audio';
 
 // Other players' tanks: drawn INTERP_DELAY in the past, smoothed between the last two updates.
@@ -18,13 +18,11 @@ interface Snap {
 }
 
 const MAX_EXTRAPOLATE = 0.25; // s: keep moving a tank whose updates stopped, but not for long
-const HEAD = new THREE.MeshLambertMaterial({ color: 0xffd0b0 });
 
 export interface Remote {
   id: number;
   sim: TankSim;
   model: TankModel;
-  head: THREE.Mesh; // pokes out of the hatch when that player is lookout
   engine: Loop;
   snaps: Snap[];
   seat: number;
@@ -56,12 +54,9 @@ export class Remotes {
   private add(s: TankState): Remote {
     const sim = new TankSim(this.physics, { x: s.pos[0], z: s.pos[2], rotY: 0 }, s.pos[1] - 2.2, true);
     const model = buildTankModel();
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 0.5), HEAD);
-    head.position.set(0.5, 0.75, 0.4);
-    model.turret.add(head);
     this.scene.add(model.root);
     const engine = this.audio.loop('engine', new THREE.Vector3(...s.pos));
-    const r: Remote = { id: s.id, sim, model, head, engine, snaps: [], seat: s.seat, dead: false };
+    const r: Remote = { id: s.id, sim, model, engine, snaps: [], seat: s.seat, dead: false };
     this.byId.set(s.id, r);
     return r;
   }
@@ -85,9 +80,9 @@ export class Remotes {
     if (!r) return;
     r.dead = true;
     r.engine.setVolume(0);
-    r.head.visible = false;
+    r.model.man.visible = false;
     r.model.root.traverse((o) => {
-      if (o instanceof THREE.Mesh && o !== r.head) {
+      if (o instanceof THREE.Mesh) {
         o.userData.mat ??= o.material;
         o.material = WRECK;
       }
@@ -106,9 +101,28 @@ export class Remotes {
     });
   }
 
-  /** World position of a remote tank's hatch (where the lookout's head is). */
+  /** World position of a remote tank's hatch (the lookout's chest). */
   hatchPos(r: Remote, out = new THREE.Vector3()) {
-    return r.model.turret.localToWorld(out.set(0.5, 0.75, 0.4));
+    return r.model.man.localToWorld(out.copy(MAN_CENTER));
+  }
+
+  /**
+   * Machine-gun check: does the segment from `origin` along `dir` (length `len`) hit any lookout
+   * sticking out of a hatch? Returns the nearest hit.
+   */
+  hitMan(origin: THREE.Vector3, dir: THREE.Vector3, len: number): { remote: Remote; t: number } | null {
+    let best: { remote: Remote; t: number } | null = null;
+    const inv = new THREE.Matrix4(), o = new THREE.Vector3(), d = new THREE.Vector3();
+    for (const r of this.byId.values()) {
+      if (!r.model.man.visible) continue;
+      r.model.man.updateWorldMatrix(true, false);
+      inv.copy(r.model.man.matrixWorld).invert();
+      o.copy(origin).applyMatrix4(inv).sub(MAN_CENTER);
+      d.copy(dir).transformDirection(inv); // unit length; the man isn't scaled
+      const t = rayBox(o, d, MAN_HALF);
+      if (t !== null && t <= len && (!best || t < best.t)) best = { remote: r, t };
+    }
+    return best;
   }
 
   /** Find the remote tank a collider belongs to. */
@@ -156,7 +170,7 @@ export class Remotes {
       r.model.turret.rotation.y = yaw;
       r.model.gun.rotation.x = pitch;
       r.seat = seat;
-      r.head.visible = SEAT_CODES[seat] === 'lookout' && !r.dead;
+      r.model.man.visible = SEAT_CODES[seat] === 'lookout' && !r.dead;
       // Cursed but cheap: both tracks scroll at hull speed.
       const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
       const v = s[s.length - 1].vel.dot(fwd);
@@ -165,6 +179,23 @@ export class Remotes {
       r.engine.setRate(0.6 + speed / 12);
     }
   }
+}
+
+/** Ray vs axis-aligned box centred on the origin: distance to entry, or null. */
+function rayBox(o: THREE.Vector3, d: THREE.Vector3, half: THREE.Vector3): number | null {
+  let tMin = 0, tMax = Infinity;
+  for (const k of ['x', 'y', 'z'] as const) {
+    if (Math.abs(d[k]) < 1e-9) {
+      if (Math.abs(o[k]) > half[k]) return null;
+      continue;
+    }
+    let t1 = (-half[k] - o[k]) / d[k], t2 = (half[k] - o[k]) / d[k];
+    if (t1 > t2) [t1, t2] = [t2, t1];
+    tMin = Math.max(tMin, t1);
+    tMax = Math.min(tMax, t2);
+    if (tMin > tMax) return null;
+  }
+  return tMin;
 }
 
 function lerpAngle(a: number, b: number, k: number) {

@@ -12,6 +12,8 @@ const MAT = {
   smoke: basic(0x0a0006),
   smokeLight: basic(0x1a1a1a),
   tracer: basic(0xff3a1a),
+  bullet: basic(0xffd000),
+  dust: basic(0x4a3a2a),
   fire: basic(0xff3000),
 };
 const SPHERE = new THREE.IcosahedronGeometry(1, 0);
@@ -27,6 +29,36 @@ interface Effect {
 export class Fx {
   private effects: Effect[] = [];
   private tracers = new Map<number, THREE.Mesh>();
+  private bulletTracers = new Map<number, THREE.Mesh>();
+  private static BULLET_GEO = new THREE.BoxGeometry(0.08, 0.08, 2.5);
+
+  /** Small yellow streaks for machine-gun bullets. */
+  syncBulletTracers(bullets: ReadonlyArray<{ id: number; pos: THREE.Vector3; vel: THREE.Vector3 }>) {
+    const seen = new Set<number>();
+    for (const b of bullets) {
+      seen.add(b.id);
+      let m = this.bulletTracers.get(b.id);
+      if (!m) {
+        m = new THREE.Mesh(Fx.BULLET_GEO, MAT.bullet);
+        this.bulletTracers.set(b.id, m);
+        this.scene.add(m);
+      }
+      m.position.copy(b.pos);
+      m.lookAt(b.pos.clone().add(b.vel));
+    }
+    for (const [id, m] of this.bulletTracers) {
+      if (seen.has(id)) continue;
+      this.scene.remove(m);
+      this.bulletTracers.delete(id);
+    }
+  }
+
+  /** A bullet hit something hard: a tiny dark puff. Hitting a person: a red one. */
+  puff(pos: THREE.Vector3, blood = false) {
+    const p = new THREE.Mesh(SPHERE, blood ? MAT.flash : MAT.dust);
+    p.position.copy(pos);
+    this.add(p, 0.3, (e, t) => e.obj.scale.setScalar(0.25 + t * 1.5));
+  }
 
   constructor(private scene: THREE.Scene) {}
 

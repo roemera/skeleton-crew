@@ -19,6 +19,7 @@ const MU_LONG = 1.0;
 const MU_LAT = 0.8;
 const ACCEL_MAX = 3; // m/s^2
 const BRAKE_MAX = 8; // m/s^2
+const COAX_CONVERGE = 75; // m: the small map's typical range
 const AIM_LEAD = (3 * Math.PI) / 180; // rad: how far the mouse may get ahead of the turret
 
 /** Tank collision groups: member of group 3, collides with everything except debris (group 2). */
@@ -212,6 +213,21 @@ export class TankSim {
     const q = new THREE.Quaternion(r.x, r.y, r.z, r.w);
     this.gunPointLocal(-BARREL_LENGTH, outPos).applyQuaternion(q).add(new THREE.Vector3(t.x, t.y, t.z));
     outDir.set(0, 0, -1).applyQuaternion(this.gunFrame(new THREE.Quaternion())).applyQuaternion(q);
+  }
+
+  /**
+   * Coaxial machine gun: beside the cannon's mantlet, boresighted to cross the cannon's line at
+   * COAX_CONVERGE metres, so its bullets land near the crosshair at fighting ranges.
+   */
+  coax(outPos: THREE.Vector3, outDir: THREE.Vector3) {
+    const t = this.body.translation(), r = this.body.rotation();
+    const q = new THREE.Quaternion(r.x, r.y, r.z, r.w), p = new THREE.Vector3(t.x, t.y, t.z);
+    const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.turretYaw);
+    const qPitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.gunPitch);
+    outPos.set(0.25, 0.05, -1.0).applyQuaternion(qPitch).add(GUN_OFFSET).applyQuaternion(qYaw).add(TURRET_OFFSET)
+      .applyQuaternion(q).add(p);
+    const aimPoint = this.gunPointLocal(-COAX_CONVERGE, new THREE.Vector3()).applyQuaternion(q).add(p);
+    outDir.copy(aimPoint).sub(outPos).normalize();
   }
 
   /** Kick the hull back when the gun fires. */

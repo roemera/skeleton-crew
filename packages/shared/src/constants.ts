@@ -51,6 +51,12 @@ export const STORAGE_SIZE = 30;
 export const RACK_REFILL_TIME = 4; // s per shell from storage to rack
 export const BARREL_LENGTH = 4.6; // m
 
+// Coaxial machine gun (gunner, middle mouse). Only hurts a lookout sticking out of a hatch.
+export const MG_SPEED = 400; // m/s: slow enough for visible drop
+export const MG_RATE = 10; // rounds per second
+export const MG_SPREAD = (0.4 * Math.PI) / 180; // rad
+export const MG_LIFETIME = 1.5; // s
+
 // Damage
 export const TANK_HEALTH = 100;
 export const RESPAWN_DELAY = 5; // s

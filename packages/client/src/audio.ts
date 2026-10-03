@@ -9,7 +9,7 @@ const SPEED_OF_SOUND = 343; // m/s
 const INSIDE_CUTOFF = 700; // Hz: outside world heard through armour
 const OUTSIDE_CUTOFF = 18000; // Hz: head out of the hatch
 
-export type SoundName = 'cannon' | 'explosion' | 'clank' | 'breech' | 'dry' | 'engine' | 'crawl' | 'impact';
+export type SoundName = 'cannon' | 'explosion' | 'clank' | 'breech' | 'dry' | 'engine' | 'crawl' | 'impact' | 'mg';
 
 type Gen = (t: number, rnd: () => number) => number;
 
@@ -54,6 +54,10 @@ const GENERATORS: Record<SoundName, { seconds: number; gen: () => Gen }> = {
     gen: () => (t, r) =>
       (0.7 * Math.sin(2 * Math.PI * 180 * t) + 0.5 * Math.sin(2 * Math.PI * 610 * t)) * Math.exp(-t * 10) +
       (t < 0.02 ? r() * 2 - 1 : 0) + Math.sin(2 * Math.PI * 60 * t) * Math.exp(-t * 20),
+  },
+  mg: {
+    seconds: 0.1,
+    gen: () => (t, r) => ((r() * 2 - 1) * 1.6 + Math.sin(2 * Math.PI * 220 * t)) * Math.exp(-t * 45),
   },
   dry: {
     seconds: 0.12,

@@ -67,8 +67,8 @@ export class Net {
     this.send({ t: 'start' });
   }
 
-  sendFire(shell: number, pos: Vec3, vel: Vec3) {
-    this.send({ t: 'fire', shell, pos, vel });
+  sendFire(shell: number, pos: Vec3, vel: Vec3, mg = false) {
+    this.send(mg ? { t: 'fire', shell, pos, vel, mg } : { t: 'fire', shell, pos, vel });
   }
 
   sendHit(shell: number, target: number, zone: HitZone, point: Vec3) {

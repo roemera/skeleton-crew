@@ -28,6 +28,7 @@ export class Input {
       [this.mouseX, this.mouseY] = this.toLowRes(e.clientX, e.clientY);
     });
     window.addEventListener('mousedown', (e) => {
+      if (e.button === 1) e.preventDefault(); // middle button: machine gun, not autoscroll
       this.mouseButtons.add(e.button);
       const [x, y] = this.toLowRes(e.clientX, e.clientY);
       this.clicks.push({ x, y, button: e.button, locked: this.locked });

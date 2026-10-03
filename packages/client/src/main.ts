@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import {
-  HATCH_KILL_RADIUS, PART_LABEL, PHYSICS_HZ, RENDER_HEIGHT, RENDER_WIDTH, RESPAWN_DELAY, SEAT_CODES,
+  HATCH_KILL_RADIUS, MG_RATE, MG_SPEED, MG_SPREAD, PART_LABEL, PHYSICS_HZ, RENDER_HEIGHT, RENDER_WIDTH, RESPAWN_DELAY, SEAT_CODES,
   SEAT_CRAWLING, SHELL_SPEED, SPAWN_PROTECTION, STATE_HZ, ZONE_LABEL, generateMap, hullZone,
   type HitZone, type Part, type Phase, type Score, type ServerMsg,
 } from '@skeleton-crew/shared';
@@ -14,6 +14,7 @@ import { Input } from './input';
 import { Hud, HUD_COLORS } from './ui/hud';
 import { Gun } from './sim/gun';
 import { Shells, type HitOutcome, type Shell, type ShellHit } from './sim/shells';
+import { Bullets } from './sim/bullets';
 import type { ColliderRole } from './sim/tank';
 import { LoaderStation } from './ui/loader';
 import { Fx } from './fx';
@@ -141,6 +142,35 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
 
   const shells = new Shells(physics, (shell, hit) => onShellHit(shell, hit));
 
+  // Machine-gun bullets only hurt a lookout sticking out of a hatch.
+  const bullets = new Bullets(
+    physics,
+    (origin, dir, len) => {
+      const h = remotes?.hitMan(origin, dir, len);
+      return h ? { t: h.t, target: h.remote.id } : null;
+    },
+    (b, target, point) => {
+      fx.puff(point, true);
+      if (!b.visual) net?.sendHit(b.id, target, 'man', arr(point));
+    },
+    (_b, point) => fx.puff(point),
+  );
+  let mgCooldown = 0;
+  function fireMg() {
+    const pos = new THREE.Vector3(), dir = new THREE.Vector3();
+    tank.coax(pos, dir);
+    // a little spread: a cone around the barrel
+    dir.x += (Math.random() - 0.5) * 2 * MG_SPREAD;
+    dir.y += (Math.random() - 0.5) * 2 * MG_SPREAD;
+    dir.z += (Math.random() - 0.5) * 2 * MG_SPREAD;
+    dir.normalize();
+    const v = tank.body.linvel();
+    const vel = dir.multiplyScalar(MG_SPEED).add(new THREE.Vector3(v.x, v.y, v.z));
+    const b = bullets.spawn(pos, vel, tank.body);
+    net?.sendFire(b.id, arr(pos), arr(vel), true);
+    audio.play('mg', { volume: 0.5 });
+  }
+
   /** Which zone a hit on a tank is, from the collider it hit and the surface normal. */
   function classifyZone(role: ColliderRole, body: { rotation(): { x: number; y: number; z: number; w: number } }, normal: THREE.Vector3): HitZone {
     if (role === 'barrel') return 'barrel';
@@ -177,7 +207,10 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
     fx.explosion(hit.point, found || remote ? 1.2 : 1);
     audio.play('explosion', { pos: hit.point });
     if (remote) audio.play('impact', { pos: hit.point });
-    const direct = remote && !remote.remote.dead ? { id: remote.remote.id, zone: classifyZone(remote.role, remote.remote.sim.body, hit.normal) } : null;
+    // Any shell hit on a tank with its lookout out is a shrapnel kill (the server checks this too).
+    const direct = remote && !remote.remote.dead
+      ? { id: remote.remote.id, zone: SEAT_CODES[remote.remote.seat] === 'lookout' ? ('hatch' as const) : classifyZone(remote.role, remote.remote.sim.body, hit.normal) }
+      : null;
     reportHits(shell, hit.point, direct);
     if (found && targets) {
       audio.play('impact', { pos: hit.point });
@@ -283,6 +316,10 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
         say('GO GO GO', HUD_COLORS.lime);
       } else if (msg.t === 'left') {
         remotes.remove(msg.id);
+      } else if (msg.t === 'fire' && msg.mg) {
+        const pos = new THREE.Vector3(...msg.pos), vel = new THREE.Vector3(...msg.vel);
+        bullets.spawn(pos, vel, remotes.byId.get(msg.from)?.sim.body, true);
+        audio.play('mg', { pos, volume: 0.7 });
       } else if (msg.t === 'fire') {
         // Someone else's shot: draw it and let it explode here; they report its hits.
         const pos = new THREE.Vector3(...msg.pos), vel = new THREE.Vector3(...msg.vel);
@@ -366,7 +403,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
   const tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion(), tmpE = new THREE.Euler(0, 0, 0, 'YXZ');
   let acc = 0, last = performance.now() / 1000, time = 0;
 
-  function handleInput() {
+  function handleInput(dt: number) {
     if (!controlling()) {
       // Lobby/countdown: tank parked, input ignored.
       input.takePresses();
@@ -425,6 +462,14 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
         tank.aimBy(-dx * sens, -dy * sens);
         if (rmb) gunnerZoom = gunnerZoom === '2X' ? '4X' : '2X';
         if (lmb) fire();
+        // Hold the middle button for the machine gun. Unlimited ammo, no recoil.
+        if (input.mouseButtons.has(1) && input.locked) {
+          mgCooldown -= dt;
+          while (mgCooldown <= 0) {
+            fireMg();
+            mgCooldown += 1 / MG_RATE;
+          }
+        } else mgCooldown = 0;
         break;
       }
       case 'loader': {
@@ -473,7 +518,8 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
         camera.quaternion.copy(hullQuat).multiply(tmpQ.setFromEuler(tmpE.set(look.driver.pitch, look.driver.yaw, 0)));
         break;
       case 'gunner':
-        camera.position.copy(model.gun.localToWorld(tmpV.set(0.55, 0.3, -0.4)));
+        // The sight sits right above the cannon, so the crosshair lines up with both guns.
+        camera.position.copy(model.gun.localToWorld(tmpV.set(0, 0.3, -0.4)));
         model.gun.getWorldQuaternion(camera.quaternion);
         fov = GUNNER_FOV[gunnerZoom];
         zoom = gunnerZoom;
@@ -501,7 +547,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
     last = now;
     time += dt;
 
-    handleInput();
+    handleInput(dt);
     seats.update(dt);
     remotes?.update(time, dt);
     acc += dt;
@@ -511,6 +557,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
       physics.step();
       world.checkBreaks(tank.hullCollider, Math.abs(tank.speed));
       shells.step(STEP);
+      bullets.step(STEP);
       acc -= STEP;
     }
     if (gun.update(dt) && seats.current === 'loader') audio.play('clank', { rate: 1.2, volume: 0.4 });
@@ -518,6 +565,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
     targets?.update(dt);
     sendState(dt);
     fx.syncTracers(shells.live);
+    fx.syncBulletTracers(bullets.live);
     fx.update(dt);
     if (message && time > message.until) message = null;
 
@@ -566,7 +614,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
 
   // Handle for debugging and automated checks.
   (window as unknown as { __game: unknown }).__game = {
-    THREE, tank, seats, map, physics, look, world, gun, targets, remotes, shells, fire, net,
+    THREE, tank, seats, map, physics, look, world, gun, targets, remotes, shells, bullets, fire, fireMg, net,
     get phase() { return phase; },
     get dead() { return dead; },
     get scores() { return scores; },

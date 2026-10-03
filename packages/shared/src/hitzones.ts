@@ -3,8 +3,9 @@ import { TANK_HEALTH } from './constants.ts';
 // Where a shell hits decides the damage and which part it can break (design doc, Damage table).
 
 export type Part = 'tracks' | 'engine' | 'turretRing' | 'gun' | 'optics';
-// 'hatch': a shell exploded within HATCH_KILL_RADIUS of an open hatch with the lookout in it.
-export type HitZone = 'front' | 'side' | 'rear' | 'turret' | 'barrel' | 'top' | 'hatch';
+// 'hatch': a shell hit a tank whose lookout is out (or exploded within HATCH_KILL_RADIUS of them): shrapnel.
+// 'man': a machine-gun bullet hit the lookout sticking out of the hatch.
+export type HitZone = 'front' | 'side' | 'rear' | 'turret' | 'barrel' | 'top' | 'hatch' | 'man';
 
 export interface ZoneRule {
   damage: number;
@@ -13,13 +14,14 @@ export interface ZoneRule {
 }
 
 export const HIT_ZONES: Record<HitZone, ZoneRule> = {
-  front: { damage: 15, part: null, chance: 0 },
-  side: { damage: 30, part: 'tracks', chance: 0.5 },
-  rear: { damage: 45, part: 'engine', chance: 0.5 },
+  front: { damage: 50, part: null, chance: 0 }, // 2 shots
+  side: { damage: 100, part: 'tracks', chance: 0.5 }, // 1 shot
+  rear: { damage: 50, part: 'engine', chance: 0.5 }, // 2 shots
   turret: { damage: 25, part: 'turretRing', chance: 0.4 },
   barrel: { damage: 10, part: 'gun', chance: 1 },
   top: { damage: 40, part: 'optics', chance: 0.5 },
   hatch: { damage: 1000, part: null, chance: 0 }, // instant kill
+  man: { damage: 34, part: null, chance: 0 }, // 3 machine-gun hits
 };
 
 export const REPAIR_TIME: Record<Part, number> = {
@@ -37,7 +39,8 @@ export const ZONE_LABEL: Record<HitZone, string> = {
   turret: 'TURRET',
   barrel: 'GUN BARREL',
   top: 'TOP',
-  hatch: 'HEAD OUT OF THE HATCH',
+  hatch: 'SHRAPNEL (HEAD OUT OF THE HATCH)',
+  man: 'MACHINE GUN (HEAD OUT OF THE HATCH)',
 };
 
 export const PART_LABEL: Record<Part, string> = {
