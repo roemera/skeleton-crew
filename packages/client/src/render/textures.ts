@@ -77,10 +77,14 @@ export const tex = {
     }),
   track: () =>
     canvasTexture(16, 6, (ctx, s) => {
+      // u runs across the track, v along it (see the track UVs in models/tank.ts).
+      // Grooves run along the track like a belt; lime cross ticks show it moving.
       ctx.fillStyle = '#222';
       ctx.fillRect(0, 0, s, s);
       ctx.fillStyle = '#00ffd0';
-      for (let y = 0; y < s; y += 4) ctx.fillRect(0, y, s, 1);
+      for (let x = 0; x < s; x += 4) ctx.fillRect(x, 0, 1, s);
+      ctx.fillStyle = '#b6ff00';
+      for (const y of [0, 8]) for (let x = 1; x < s; x += 4) ctx.fillRect(x, y, 2, 2);
     }),
   building: () =>
     canvasTexture(32, 7, (ctx, s, r) => {
