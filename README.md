@@ -31,6 +31,9 @@ Ctrl+C stops both. PRACTICE OFFLINE on the join screen gives the single-player r
 binaries for your platform if npm skipped them (a known npm bug that shows up on Windows as
 "Cannot find native binding").
 
+The map is 400 m across, sized for a tight 1v1 (`MAP_SIZE` in `packages/shared/src/constants.ts`;
+the generator scales its layout to it).
+
 URL options: `?offline` skips the menu, `?join=host:port&name=X&password=Y` joins directly,
 `?seed=123` picks the offline map, `?test` hides the click-to-play panel (for headless checks).
 

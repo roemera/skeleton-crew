@@ -30,8 +30,13 @@ export interface GameMap {
   heightAt(x: number, z: number): number;
 }
 
-const FARM = { x: 120, z: -120, r: 70 };
-const RIDGE = { ax: -330, az: 140, bx: 260, bz: 300, width: 28, height: 24 };
+// The layout was designed for a 1000 m map and scales with MAP_SIZE:
+// positions scale by K, feature sizes (hills, farm yard, patches) by R so slopes stay about as steep.
+const K = MAP_SIZE / 1000;
+const R = Math.sqrt(K);
+const FARM = { x: 120 * K, z: -120 * K, r: 70 * R };
+const RIDGE = { ax: -330 * K, az: 140 * K, bx: 260 * K, bz: 300 * K, width: 28 * R, height: 24 * R };
+const RIM = Math.max(40, 60 * K); // m of rising ground along the edge
 
 export function generateMap(seed: number): GameMap {
   const rng = makeRng(seed);
@@ -42,13 +47,13 @@ export function generateMap(seed: number): GameMap {
   const heights = new Float32Array(n * n);
 
   const rawHeight = (x: number, z: number) => {
-    let h = 26 * noise(x / 260 + 10, z / 260 + 10, 4) - 13;
+    let h = (26 * noise(x / (260 * R) + 10, z / (260 * R) + 10, 4) - 13) * R;
     // Rock ridge: a raised band along a segment.
     const d = distToSegment(x, z, RIDGE.ax, RIDGE.az, RIDGE.bx, RIDGE.bz);
-    h += RIDGE.height * Math.exp(-((d / RIDGE.width) ** 2)) * (0.6 + 0.8 * noise(x / 40, z / 40, 2));
+    h += RIDGE.height * Math.exp(-((d / RIDGE.width) ** 2)) * (0.6 + 0.8 * noise(x / (40 * R), z / (40 * R), 2));
     // Raise the rim so the map reads as a bowl.
     const edge = Math.max(Math.abs(x), Math.abs(z));
-    if (edge > half - 60) h += ((edge - (half - 60)) / 60) ** 2 * 35;
+    if (edge > half - RIM) h += ((edge - (half - RIM)) / RIM) ** 2 * 35 * R;
     return h;
   };
 
@@ -59,7 +64,7 @@ export function generateMap(seed: number): GameMap {
       const x = -half + ix * step, z = -half + iz * step;
       let h = rawHeight(x, z);
       const fd = Math.hypot(x - FARM.x, z - FARM.z);
-      const t = clamp01((fd - FARM.r) / 40);
+      const t = clamp01((fd - FARM.r) / (40 * R));
       h = farmH + (h - farmH) * t * t * (3 - 2 * t);
       heights[iz * n + ix] = h;
     }
@@ -86,7 +91,7 @@ export function generateMap(seed: number): GameMap {
   const farmRot = rng.range(-0.3, 0.3);
   const local = (lx: number, lz: number) => {
     const c = Math.cos(farmRot), s = Math.sin(farmRot);
-    return [FARM.x + lx * c + lz * s, FARM.z - lx * s + lz * c] as const;
+    return [FARM.x + R * (lx * c + lz * s), FARM.z + R * (-lx * s + lz * c)] as const;
   };
   const farmBuildings: Array<[number, number, number, number, number]> = [
     [-18, -10, 16, 9, 11], // barn
@@ -103,32 +108,35 @@ export function generateMap(seed: number): GameMap {
     add('silo', x, z, 0, [6, 14, 6], false);
   }
   // Fence rectangle around the farm, with gaps for gates.
-  const fw = 44, fd = 36, seg = 4;
+  // Fence positions go through local(), which scales by R; segments stay 4 m long.
+  const fw = 44, fd = 36, seg = 4 / R;
   for (let i = -fw; i < fw; i += seg) {
-    if (Math.abs(i + seg / 2) < 6) continue; // gate
+    if (Math.abs(i + seg / 2) < 6 / R) continue; // gate
     for (const side of [-fd, fd]) {
       const [x, z] = local(i + seg / 2, side);
-      add('fence', x, z, farmRot, [seg, 1.2, 0.2], true);
+      add('fence', x, z, farmRot, [4, 1.2, 0.2], true);
     }
   }
   for (let i = -fd; i < fd; i += seg) {
-    if (Math.abs(i + seg / 2) < 6) continue;
+    if (Math.abs(i + seg / 2) < 6 / R) continue;
     for (const side of [-fw, fw]) {
       const [x, z] = local(side, i + seg / 2);
-      add('fence', x, z, farmRot + Math.PI / 2, [seg, 1.2, 0.2], true);
+      add('fence', x, z, farmRot + Math.PI / 2, [4, 1.2, 0.2], true);
     }
   }
 
   // Rocks: scattered, denser along the ridge.
-  for (let i = 0; i < 70; i++) {
+  // Cover scales with the map's width (not area), so a small map stays cluttered.
+  const rockCount = Math.round(70 * K), ridgeRocks = Math.round(30 * K);
+  for (let i = 0; i < rockCount; i++) {
     let x: number, z: number;
-    if (i < 30) {
+    if (i < ridgeRocks) {
       const t = rng.next();
-      x = RIDGE.ax + (RIDGE.bx - RIDGE.ax) * t + rng.range(-30, 30);
-      z = RIDGE.az + (RIDGE.bz - RIDGE.az) * t + rng.range(-30, 30);
+      x = RIDGE.ax + (RIDGE.bx - RIDGE.ax) * t + rng.range(-30, 30) * R;
+      z = RIDGE.az + (RIDGE.bz - RIDGE.az) * t + rng.range(-30, 30) * R;
     } else {
-      x = rng.range(-half + 70, half - 70);
-      z = rng.range(-half + 70, half - 70);
+      x = rng.range(-half + RIM, half - RIM);
+      z = rng.range(-half + RIM, half - RIM);
     }
     if (inFarm(x, z, 15)) continue;
     const s = rng.range(2, 7);
@@ -136,14 +144,15 @@ export function generateMap(seed: number): GameMap {
   }
 
   // Tree patches.
-  for (let p = 0; p < 7; p++) {
-    const cx = rng.range(-half + 100, half - 100), cz = rng.range(-half + 100, half - 100);
-    if (inFarm(cx, cz, 50)) continue;
-    const count = rng.int(12, 24);
+  const patches = Math.max(3, Math.round(7 * K + 1));
+  for (let p = 0; p < patches; p++) {
+    const cx = rng.range(-half + RIM + 20, half - RIM - 20), cz = rng.range(-half + RIM + 20, half - RIM - 20);
+    if (inFarm(cx, cz, 50 * R)) continue;
+    const count = Math.round(rng.int(12, 24) * R);
     for (let i = 0; i < count; i++) {
-      const a = rng.range(0, Math.PI * 2), r = 32 * Math.sqrt(rng.next());
+      const a = rng.range(0, Math.PI * 2), r = 32 * R * Math.sqrt(rng.next());
       const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
-      if (!inBounds(x, z, 60)) continue;
+      if (!inBounds(x, z, RIM)) continue;
       const h = rng.range(6, 11);
       add('tree', x, z, rng.range(0, Math.PI * 2), [h * 0.35, h, h * 0.35], true);
     }
@@ -153,8 +162,8 @@ export function generateMap(seed: number): GameMap {
   for (let i = 0; i < 14; i++) {
     const near = i < 6;
     const a = rng.range(0, Math.PI * 2);
-    const x = near ? FARM.x + Math.cos(a) * rng.range(55, 75) : rng.range(-half + 90, half - 90);
-    const z = near ? FARM.z + Math.sin(a) * rng.range(55, 75) : rng.range(-half + 90, half - 90);
+    const x = near ? FARM.x + Math.cos(a) * rng.range(55, 75) * R : rng.range(-half + RIM, half - RIM);
+    const z = near ? FARM.z + Math.sin(a) * rng.range(55, 75) * R : rng.range(-half + RIM, half - RIM);
     add('wall', x, z, rng.range(0, Math.PI), [6, 2, 0.6], true);
   }
 
@@ -168,12 +177,14 @@ export function generateMap(seed: number): GameMap {
       spawns.push({ x, z, rotY: Math.atan2(x, z) });
     }
   };
-  ring(8, 360, 0.2);
-  ring(4, 170, 0.9);
+  ring(8, 360 * K, 0.2);
+  ring(4, 170 * K, 0.9);
+  // No spawning in the farm yard.
+  for (let i = spawns.length - 1; i >= 0; i--) if (inFarm(spawns[i].x, spawns[i].z, 15)) spawns.splice(i, 1);
   // Keep spawns clear of objects.
   for (let i = objects.length - 1; i >= 0; i--) {
     const o = objects[i];
-    if (spawns.some((s) => Math.hypot(s.x - o.x, s.z - o.z) < 14)) objects.splice(i, 1);
+    if (spawns.some((s) => Math.hypot(s.x - o.x, s.z - o.z) < 12)) objects.splice(i, 1);
   }
   objects.forEach((o, i) => (o.id = i));
 

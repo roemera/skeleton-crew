@@ -29,18 +29,18 @@ function speckle(ctx: CanvasRenderingContext2D, size: number, rnd: () => number,
 export const tex = {
   grass: () =>
     canvasTexture(32, 1, (ctx, s, r) => {
-      ctx.fillStyle = '#5bd12a';
+      // Greens only: tanks and effects carry the loud colours.
+      ctx.fillStyle = '#4fbf24';
       ctx.fillRect(0, 0, s, s);
-      // a sickly checker under the speckle
-      ctx.fillStyle = '#7ef03c';
+      ctx.fillStyle = '#62d232';
       for (let y = 0; y < s; y += 8) for (let x = (y / 8) % 2 ? 0 : 8; x < s; x += 16) ctx.fillRect(x, y, 8, 8);
-      speckle(ctx, s, r, ['#ff3df2', '#e8ff1a', '#2a8f1a', '#00ffd0'], 70);
+      speckle(ctx, s, r, ['#2a8f1a', '#3aa61f', '#7ee84a', '#1f6e14'], 70);
     }),
   rock: () =>
     canvasTexture(16, 2, (ctx, s, r) => {
-      ctx.fillStyle = '#b02cff';
+      ctx.fillStyle = '#6b5034'; // muted: the post pass boosts saturation
       ctx.fillRect(0, 0, s, s);
-      speckle(ctx, s, r, ['#ff4fd8', '#5b0fa8', '#ffe600'], 60);
+      speckle(ctx, s, r, ['#4e3a26', '#8a6a48', '#3e2c1c'], 60);
     }),
   hazard: () =>
     canvasTexture(16, 3, (ctx, s) => {

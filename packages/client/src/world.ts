@@ -38,7 +38,7 @@ export class World {
   constructor(readonly map: GameMap, readonly physics: RAPIER.World) {
     this.scene.background = new THREE.Color(SKY);
     this.scene.fog = new THREE.Fog(FOG, FOG_NEAR, FOG_FAR);
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0xff3df2, 1.6));
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7a5a, 1.6));
     const sun = new THREE.DirectionalLight(0xfff27a, 2.2);
     sun.position.set(0.4, 1, 0.25);
     this.scene.add(sun);
@@ -52,8 +52,8 @@ export class World {
     const { cells, size, heights } = this.map;
     const n = cells + 1, step = size / cells, half = size / 2;
     const pos = new Float32Array(n * n * 3), uv = new Float32Array(n * n * 2), col = new Float32Array(n * n * 3);
-    // Height bands tint the grass texture: yellow lowlands, pink-ish mid hills, cyan tops.
-    const bands = [new THREE.Color(0xfff07a), new THREE.Color(0xffffff), new THREE.Color(0xff9be8), new THREE.Color(0x8afff0)];
+    // Height bands tint the grass: shades of green, darker low, lighter high.
+    const bands = [new THREE.Color(0xb8d8a0), new THREE.Color(0xd8f0c0), new THREE.Color(0xf0fff0), new THREE.Color(0xffffff)];
     const c = new THREE.Color();
     for (let iz = 0; iz < n; iz++) {
       for (let ix = 0; ix < n; ix++) {

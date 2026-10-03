@@ -2,7 +2,7 @@ import type { HitZone, Part } from './hitzones.ts';
 
 // Network messages. Rare messages are JSON; the 20 Hz tank state is a 52-byte binary packet.
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 export const DEFAULT_PORT = 8080;
 export const STATE_HZ = 20;
 export const MAX_PLAYERS = 8;

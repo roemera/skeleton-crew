@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { RESPAWN_DELAY, type GameMap, type Spawn } from '@skeleton-crew/shared';
+import { MAP_SIZE, RESPAWN_DELAY, type GameMap, type Spawn } from '@skeleton-crew/shared';
 import { TankSim } from './sim/tank';
 import { buildTankModel, TRACK_TEXTURE_LENGTH, type TankModel } from './models/tank';
 import type { Audio, Loop } from './audio';
@@ -32,19 +32,22 @@ export class Targets {
     // Fan of targets ahead of the player's spawn, at increasing range.
     const fwd = new THREE.Vector2(-Math.sin(from.rotY), -Math.cos(from.rotY));
     const right = new THREE.Vector2(-fwd.y, fwd.x);
+    // Range scales with the map (designed at 1000 m), so the targets stay on it.
+    const k = MAP_SIZE / 1000;
     const placements: Array<[number, number, number]> = [
-      [120, -25, 1.2], // range m, sideways m, facing offset (rad): side-on
-      [220, 40, 0],
-      [320, -60, Math.PI], // facing away: rear shots
-      [450, 20, 0.6],
+      [Math.max(50, 120 * k), -25 * k, 1.2], // range m, sideways m, facing offset (rad): side-on
+      [Math.max(80, 220 * k), 40 * k, 0],
+      [320 * k, -60 * k, Math.PI], // facing away: rear shots
+      [450 * k, 20 * k, 0.6],
     ];
     const eyeY = map.heightAt(from.x, from.z) + 2.5;
     for (const [range, side, face] of placements) {
       // Slide the target sideways until the spawn can see it over the terrain.
       let best = { x: 0, z: 0 };
-      for (const shift of [0, 30, -30, 60, -60, 90, -90, 120, -120]) {
-        const x = from.x + fwd.x * range + right.x * (side + shift);
-        const z = from.z + fwd.y * range + right.y * (side + shift);
+      const lim = MAP_SIZE / 2 - 45; // stay inside the rim
+      for (const shift of [0, 15, -15, 30, -30, 45, -45, 60, -60]) {
+        const x = Math.max(-lim, Math.min(lim, from.x + fwd.x * range + right.x * (side + shift)));
+        const z = Math.max(-lim, Math.min(lim, from.z + fwd.y * range + right.y * (side + shift)));
         best = { x, z };
         if (this.visible(from.x, eyeY, from.z, x, map.heightAt(x, z) + 1.2, z)) break;
       }
