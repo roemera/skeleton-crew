@@ -1,13 +1,26 @@
+import type { HitZone, Part } from './hitzones.ts';
+
 // Network messages. Rare messages are JSON; the 20 Hz tank state is a 52-byte binary packet.
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const DEFAULT_PORT = 8080;
 export const STATE_HZ = 20;
 export const MAX_PLAYERS = 8;
 export const INTERP_DELAY = 0.1; // s: other tanks are drawn this far in the past
 export const COUNTDOWN_SECONDS = 3;
 
-export type Phase = 'lobby' | 'countdown' | 'live';
+export type Phase = 'lobby' | 'countdown' | 'live' | 'results';
+
+export interface Score {
+  id: number;
+  name: string;
+  kills: number;
+  deaths: number;
+  shots: number;
+  hits: number;
+}
+
+type Vec3 = [number, number, number];
 
 export interface PlayerInfo {
   id: number;
@@ -18,14 +31,21 @@ export interface PlayerInfo {
 export type ClientMsg =
   | { t: 'hello'; name: string; password: string; version: number }
   | { t: 'ready'; ready: boolean }
-  | { t: 'start' }; // anyone in the lobby can start the match now
+  | { t: 'start' } // anyone in the lobby can start the match now
+  | { t: 'fire'; shell: number; pos: Vec3; vel: Vec3 }
+  | { t: 'hit'; shell: number; target: number; zone: HitZone; point: Vec3 }; // shooter-detected
 
 export type ServerMsg =
   | { t: 'welcome'; id: number; seed: number; players: PlayerInfo[]; phase: Phase; spawn: number }
   | { t: 'reject'; reason: string }
   | { t: 'lobby'; players: PlayerInfo[]; phase: Phase; countdown: number }
   | { t: 'spawn'; spawn: number } // go to this spawn point now (match start)
-  | { t: 'left'; id: number };
+  | { t: 'left'; id: number }
+  | { t: 'fire'; from: number; shell: number; pos: Vec3; vel: Vec3 }
+  | { t: 'damage'; target: number; attacker: number; zone: HitZone; damage: number; health: number; broke: Part | null; point: Vec3 }
+  | { t: 'kill'; victim: number; killer: number; zone: HitZone; scores: Score[] }
+  | { t: 'respawn'; id: number } // that player's tank is back (clear its wreck)
+  | { t: 'results'; scores: Score[]; winner: number; seconds: number };
 
 // --- Binary tank state ---
 

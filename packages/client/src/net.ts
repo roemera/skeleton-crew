@@ -1,7 +1,9 @@
 import {
   PROTOCOL_VERSION, decodeState, encodeState,
-  type ClientMsg, type ServerMsg, type TankState,
+  type ClientMsg, type HitZone, type ServerMsg, type TankState,
 } from '@skeleton-crew/shared';
+
+type Vec3 = [number, number, number];
 
 type Welcome = Extract<ServerMsg, { t: 'welcome' }>;
 
@@ -63,6 +65,14 @@ export class Net {
 
   startMatch() {
     this.send({ t: 'start' });
+  }
+
+  sendFire(shell: number, pos: Vec3, vel: Vec3) {
+    this.send({ t: 'fire', shell, pos, vel });
+  }
+
+  sendHit(shell: number, target: number, zone: HitZone, point: Vec3) {
+    this.send({ t: 'hit', shell, target, zone, point });
   }
 
   sendState(s: TankState) {

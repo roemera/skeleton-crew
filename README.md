@@ -1,7 +1,7 @@
 # Skeleton Crew
 
 A browser tank game where you are the whole crew: driver, gunner, loader and lookout, one seat at a time.
-Switching seats takes 2 seconds. Design doc: https://claude.ai/code/artifact/6ed43f7e-4ee7-4297-b6c4-ff1759a31cf7
+Switching seats takes 1 second. Design doc: https://claude.ai/code/artifact/6ed43f7e-4ee7-4297-b6c4-ff1759a31cf7
 
 Stack: TypeScript, Three.js, Rapier (WebAssembly physics), Vite. Everything (map, models, textures) is generated in code.
 
@@ -20,7 +20,7 @@ npm start                                            # builds the game, serves i
 Everyone opens `http://<host ip>:8080`, enters a name and the password, and clicks READY.
 The match starts when everyone (2+) is ready, or when the host types `start` in the server console
 (works solo); any player can also press START NOW in the lobby. Forward TCP port 8080 on the host's router for players outside your network.
-`PORT`, `PASSWORD` and `MAP_SEED` environment variables override the config file.
+`PORT`, `PASSWORD`, `MAP_SEED` and `KILL_LIMIT` environment variables override the config file.
 
 **Developing:** `npm run dev` starts the game server (port 8080) and the Vite dev server together,
 then open http://localhost:5173 (Vite forwards the game connection to 8080). Without a
@@ -38,7 +38,7 @@ URL options: `?offline` skips the menu, `?join=host:port&name=X&password=Y` join
 
 | Seat | Controls |
 | --- | --- |
-| Any | 1 Driver, 2 Gunner, 3 Loader, 4 Lookout (2 s crawl, you control nothing meanwhile) |
+| Any | 1 Driver, 2 Gunner, 3 Loader, 4 Lookout (1 s crawl, you control nothing meanwhile), hold Tab for the scoreboard |
 | Driver | W/S throttle lever (R full, R 1/2, stop, 1/4, 1/2, full), A/D steering lever, X centre, Space brake (held) |
 | Gunner | Mouse aims (turret follows at 24 deg/s), left click fires, right click 2x/4x zoom, Shift fine aim |
 | Loader | Free cursor: drag a shell from the rack into the open breech, Space opens/closes the breech |
@@ -78,4 +78,7 @@ packages/
 - Milestone 2 (offline shooting and loading, directional sound): done. Four practice tanks sit ahead
   of the spawn; one drives in circles.
 - Milestone 3 (server, password, lobby, other tanks moving and colliding): done.
-- Next: milestone 4, networked combat (shots, damage, kills, respawn, scoreboard).
+- Milestone 4 (networked combat): done. The shooter's game reports hits, the server owns health,
+  breaks parts, counts kills; 5 s respawn with 3 s spawn protection; a shell exploding within 3 m
+  of a lookout's open hatch kills outright; first to the kill limit wins, 15 s results, then lobby.
+- Next: milestone 5, destructible objects synced between players, and lookout spotting markers.

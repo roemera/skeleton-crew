@@ -20,10 +20,11 @@ export interface Shell {
   id: number;
   pos: THREE.Vector3;
   vel: THREE.Vector3;
-  owner: RigidBodyLike;
+  owner: RAPIER.RigidBody | undefined;
   life: number;
+  /** Another player's shell: drawn and exploded here, but only its owner reports hits. */
+  visual: boolean;
 }
-type RigidBodyLike = RAPIER.RigidBody;
 
 export class Shells {
   readonly live: Shell[] = [];
@@ -31,8 +32,8 @@ export class Shells {
 
   constructor(private world: RAPIER.World, private onHit: (shell: Shell, hit: ShellHit) => HitOutcome) {}
 
-  spawn(pos: THREE.Vector3, vel: THREE.Vector3, owner: RAPIER.RigidBody): Shell {
-    const s = { id: this.nextId++, pos: pos.clone(), vel: vel.clone(), owner, life: SHELL_LIFETIME };
+  spawn(pos: THREE.Vector3, vel: THREE.Vector3, owner: RAPIER.RigidBody | undefined, visual = false): Shell {
+    const s = { id: this.nextId++, pos: pos.clone(), vel: vel.clone(), owner, life: SHELL_LIFETIME, visual };
     this.live.push(s);
     return s;
   }

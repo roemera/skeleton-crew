@@ -10,7 +10,7 @@ import { Match, type Player } from './match.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const config = loadConfig(root);
-const match = new Match(config.mapSeed);
+const match = new Match(config.mapSeed, config.killLimit);
 
 const http = createServer(serveStatic(join(root, 'packages/client/dist')));
 const wss = new WebSocketServer({ server: http, path: '/ws' });
@@ -60,6 +60,10 @@ wss.on('connection', (ws: WebSocket, req) => {
       console.log(`[join] #${player.id} ${player.name} from ${addr} (${match.players.size} playing)`);
     } else if (msg.t === 'ready' && player) {
       match.setReady(player.id, msg.ready);
+    } else if (msg.t === 'fire' && player) {
+      match.fire(player, msg);
+    } else if (msg.t === 'hit' && player) {
+      match.hit(player, msg);
     } else if (msg.t === 'start' && player) {
       console.log(`[start] #${player.id} ${player.name} started the match`);
       match.forceStart();

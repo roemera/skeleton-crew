@@ -1,6 +1,6 @@
 // Starting tuning values from the design doc. Change after playtesting.
 
-export const SEAT_SWITCH_TIME = 2.0; // s, same for every seat
+export const SEAT_SWITCH_TIME = 1.0; // s, same for every seat
 
 // Driving
 export const TOP_SPEED_FORWARD = 12; // m/s
@@ -50,3 +50,4 @@ export const BARREL_LENGTH = 4.6; // m
 export const TANK_HEALTH = 100;
 export const RESPAWN_DELAY = 5; // s
 export const SPAWN_PROTECTION = 3; // s
+export const RESULTS_TIME = 15; // s the results screen shows before the lobby

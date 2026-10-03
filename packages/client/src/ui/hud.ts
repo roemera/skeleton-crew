@@ -3,6 +3,8 @@ import type { Seat, Seats } from '../seats/seats';
 import type { TankSim } from '../sim/tank';
 import type { Gun } from '../sim/gun';
 import { BREECH, LoaderStation, RACK, SHELL } from './loader';
+import { accuracy } from './menu';
+import type { Score } from '@skeleton-crew/shared';
 import { drawText } from './font';
 
 // Garish palette.
@@ -35,6 +37,11 @@ export interface HudState {
   gun: Gun;
   loader: LoaderStation;
   message: { text: string; color: string } | null; // short-lived feedback ("HIT SIDE HULL")
+  scores: Score[] | null; // shown while Tab is held (online only)
+  myId: number;
+  dead: { killer: string; zone: string; respawnIn: number } | null;
+  protectedFor: number; // s of spawn protection left
+  hurt: number; // 0..1 red flash after being hit
 }
 
 export const HUD_COLORS = C;
@@ -72,6 +79,15 @@ export class Hud {
     else if (seat === 'loader') this.drawLoader(s);
     else this.drawLookout(s);
     if (seat !== null) this.drawDamage(s);
+    if (s.hurt > 0) {
+      ctx.fillStyle = `rgba(255,31,61,${(0.6 * s.hurt).toFixed(2)})`;
+      for (const [x, y, w, h] of [[0, 0, W, 8], [0, H - 8, W, 8], [0, 0, 8, H], [W - 8, 0, 8, H]]) ctx.fillRect(x, y, w, h);
+    }
+    if (s.protectedFor > 0 && !s.dead) {
+      ctx.fillStyle = C.black;
+      ctx.fillRect(176, 18, 128, 11);
+      drawText(ctx, `SPAWN PROTECTION ${Math.ceil(s.protectedFor)}S`, 240, 21, C.cyan, 1, 'center');
+    }
     if (s.message && seat !== null) {
       const w = s.message.text.length * 4 + 6;
       ctx.fillStyle = C.black;
@@ -79,6 +95,8 @@ export class Hud {
       drawText(ctx, s.message.text, 240, 225, s.message.color, 1, 'center');
     }
     this.drawSeatBar(s);
+    if (s.dead) this.drawDead(s);
+    if (s.scores) this.drawScores(s.scores, s.myId);
     if (!s.locked && seat !== 'loader') {
       if (s.everLocked) this.drawGrabMouse();
       else this.drawClickToPlay();
@@ -420,6 +438,46 @@ export class Hud {
     // Lever state is always known: you set it.
     const steerArrows = s.tank.steer === 0 ? '--' : (s.tank.steer < 0 ? '<' : '>').repeat(Math.round(Math.abs(s.tank.steer) * 4));
     drawText(ctx, `THR ${THROTTLE_LABEL[s.tank.throttleIdx]}  STR ${steerArrows}`, W - 4, H - 9, C.cyan, 1, 'right');
+  }
+
+  /** Dead: a cursed screen. Stuttering red noise, a skull made of text, the killer's name. */
+  private drawDead(s: HudState) {
+    const ctx = this.ctx;
+    const d = s.dead!;
+    const f = Math.floor(s.time * 8);
+    ctx.fillStyle = f % 2 ? '#3a0008' : '#14001a';
+    ctx.fillRect(0, 0, W, H - 13);
+    let seed = f * 9973;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < 900; i++) {
+      ctx.fillStyle = rnd() < 0.5 ? C.red : C.pinkDark;
+      ctx.fillRect(Math.floor(rnd() * W), Math.floor(rnd() * (H - 13)), 3, 1);
+    }
+    const jx = (f % 3) - 1, jy = ((f * 7) % 3) - 1;
+    const skull = ['  ######  ', ' ######## ', '## #### ##', '##########', ' ### ## ###', '  ######  ', '  # # # # '];
+    skull.forEach((row, i) => drawText(ctx, row.replace(/#/g, '*'), 240 + jx, 40 + i * 8 + jy, C.white, 1, 'center'));
+    drawText(ctx, 'YOU DIED', 240 + jx, 110 + jy, C.yellow, 4, 'center');
+    drawText(ctx, `KILLED BY ${d.killer}`, 240, 140, C.pink, 2, 'center');
+    drawText(ctx, `(${d.zone})`, 240, 156, C.white, 1, 'center');
+    drawText(ctx, `CRAWLING OUT OF A NEW TANK IN ${Math.max(0, Math.ceil(d.respawnIn))}`, 240, 176, C.lime, 1, 'center');
+  }
+
+  /** Tab: kills, deaths, accuracy. */
+  private drawScores(scores: Score[], myId: number) {
+    const ctx = this.ctx;
+    const h = 28 + scores.length * 12;
+    ctx.fillStyle = C.black;
+    ctx.fillRect(120, 40, 240, h);
+    ctx.fillStyle = C.yellow;
+    ctx.fillRect(120, 40, 240, 2);
+    drawText(ctx, 'TANK', 130, 48, C.yellow);
+    drawText(ctx, 'KILLS  DEATHS  HIT', 350, 48, C.yellow, 1, 'right');
+    scores.forEach((sc, i) => {
+      const y = 62 + i * 12;
+      const color = sc.id === myId ? C.lime : C.white;
+      drawText(ctx, sc.name, 130, y, color);
+      drawText(ctx, `${String(sc.kills).padStart(5)}  ${String(sc.deaths).padStart(6)}  ${accuracy(sc).padStart(4)}`, 350, y, color, 1, 'right');
+    });
   }
 
   /** After the first time: a small strip, not the whole instructions panel. */

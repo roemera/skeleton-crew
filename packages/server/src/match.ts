@@ -1,6 +1,6 @@
 import {
-  COUNTDOWN_SECONDS, MAX_PLAYERS, generateMap,
-  type Phase, type PlayerInfo, type ServerMsg, type Spawn,
+  COUNTDOWN_SECONDS, MAX_PLAYERS, RESPAWN_DELAY, RESULTS_TIME, SPAWN_PROTECTION, TankDamage, generateMap,
+  type ClientMsg, type Phase, type PlayerInfo, type Score, type ServerMsg, type Spawn,
 } from '@skeleton-crew/shared';
 
 export interface Player {
@@ -9,7 +9,20 @@ export interface Player {
   ready: boolean;
   pos: [number, number, number] | null; // last reported position, for picking spawns
   send(msg: ServerMsg): void;
+  // Combat (the server owns health; clients report their own shells' hits)
+  damage: TankDamage;
+  alive: boolean;
+  protectedUntil: number; // ms timestamp: hits before this are ignored (spawn protection)
+  kills: number;
+  deaths: number;
+  shots: number;
+  hits: number;
+  hitShells: Set<number>; // shells already counted as hits (accuracy counts each shell once)
+  respawnTimer: ReturnType<typeof setTimeout> | null;
 }
+
+type Fire = Extract<ClientMsg, { t: 'fire' }>;
+type Hit = Extract<ClientMsg, { t: 'hit' }>;
 
 /** Players, the lobby and the match phase. Pure logic: no sockets, so it is easy to test. */
 export class Match {
@@ -20,9 +33,12 @@ export class Match {
   private countdownTimer: ReturnType<typeof setInterval> | null = null;
 
   readonly seed: number;
+  readonly killLimit: number;
+  private resultsTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(seed: number) {
+  constructor(seed: number, killLimit: number) {
     this.seed = seed;
+    this.killLimit = killLimit;
     this.spawns = generateMap(seed).spawns;
   }
 
@@ -36,7 +52,11 @@ export class Match {
   }
 
   join(name: string, send: Player['send']): Player {
-    const p: Player = { id: this.freeId(), name: name.slice(0, 16) || 'TANK', ready: false, pos: null, send };
+    const p: Player = {
+      id: this.freeId(), name: name.slice(0, 16) || 'TANK', ready: false, pos: null, send,
+      damage: new TankDamage(), alive: true, protectedUntil: Date.now() + SPAWN_PROTECTION * 1000,
+      kills: 0, deaths: 0, shots: 0, hits: 0, hitShells: new Set(), respawnTimer: null,
+    };
     this.players.set(p.id, p);
     p.send({ t: 'welcome', id: p.id, seed: this.seed, players: this.list(), phase: this.phase, spawn: this.pickSpawn(p.id) });
     this.broadcastLobby();
@@ -44,6 +64,8 @@ export class Match {
   }
 
   leave(id: number) {
+    const p = this.players.get(id);
+    if (p?.respawnTimer) clearTimeout(p.respawnTimer);
     if (!this.players.delete(id)) return;
     this.broadcast({ t: 'left', id });
     if (this.players.size === 0) this.toLobby();
@@ -87,6 +109,7 @@ export class Match {
     if (this.countdownTimer) clearInterval(this.countdownTimer);
     this.countdownTimer = null;
     this.phase = 'live';
+    for (const p of this.players.values()) this.resetCombat(p);
     // Everyone to a different spawn, in random order.
     const order = this.spawns.map((_, i) => i).sort(() => Math.random() - 0.5);
     [...this.players.values()].forEach((p, i) => p.send({ t: 'spawn', spawn: order[i % order.length] }));
@@ -95,9 +118,83 @@ export class Match {
 
   private toLobby() {
     if (this.countdownTimer) clearInterval(this.countdownTimer);
-    this.countdownTimer = null;
+    if (this.resultsTimer) clearTimeout(this.resultsTimer);
+    this.countdownTimer = this.resultsTimer = null;
     this.phase = 'lobby';
-    for (const p of this.players.values()) p.ready = false;
+    for (const p of this.players.values()) {
+      p.ready = false;
+      if (p.respawnTimer) clearTimeout(p.respawnTimer);
+      p.respawnTimer = null;
+    }
+  }
+
+  private resetCombat(p: Player) {
+    if (p.respawnTimer) clearTimeout(p.respawnTimer);
+    Object.assign(p, { alive: true, protectedUntil: Date.now() + SPAWN_PROTECTION * 1000, kills: 0, deaths: 0, shots: 0, hits: 0, respawnTimer: null });
+    p.damage.reset();
+    p.hitShells.clear();
+  }
+
+  // --- Combat ---
+
+  /** A player fired: count it and show the shot to everyone else. */
+  fire(from: Player, msg: Fire) {
+    if (this.phase !== 'live' || !from.alive) return;
+    from.shots++;
+    for (const p of this.players.values()) {
+      if (p !== from) p.send({ t: 'fire', from: from.id, shell: msg.shell, pos: msg.pos, vel: msg.vel });
+    }
+  }
+
+  /** The shooter's client says its shell hit someone. Trusted, but the target must be alive and unprotected. */
+  hit(from: Player, msg: Hit) {
+    const target = this.players.get(msg.target);
+    if (this.phase !== 'live' || !target || target === from || !target.alive || Date.now() < target.protectedUntil) return;
+    const res = target.damage.applyHit(msg.zone, Math.random());
+    if (!from.hitShells.has(msg.shell)) {
+      from.hitShells.add(msg.shell);
+      from.hits++;
+    }
+    this.broadcast({ t: 'damage', target: target.id, attacker: from.id, zone: msg.zone, damage: res.damage, health: res.health, broke: res.broke, point: msg.point });
+    if (!res.destroyed) return;
+    target.alive = false;
+    target.deaths++;
+    from.kills++;
+    console.log(`[kill] ${from.name} killed ${target.name} (${msg.zone}) - ${from.kills}/${this.killLimit}`);
+    this.broadcast({ t: 'kill', victim: target.id, killer: from.id, zone: msg.zone, scores: this.scores() });
+    if (from.kills >= this.killLimit) return this.endMatch(from.id);
+    target.respawnTimer = setTimeout(() => this.respawn(target), RESPAWN_DELAY * 1000);
+  }
+
+  private respawn(p: Player) {
+    p.respawnTimer = null;
+    if (this.phase !== 'live' || !this.players.has(p.id)) return;
+    p.damage.reset();
+    p.alive = true;
+    p.protectedUntil = Date.now() + SPAWN_PROTECTION * 1000;
+    p.send({ t: 'spawn', spawn: this.pickSpawn(p.id) });
+    this.broadcast({ t: 'respawn', id: p.id });
+  }
+
+  private endMatch(winner: number) {
+    console.log(`[results] ${this.players.get(winner)?.name} wins`);
+    this.phase = 'results';
+    for (const p of this.players.values()) {
+      if (p.respawnTimer) clearTimeout(p.respawnTimer);
+      p.respawnTimer = null;
+    }
+    this.broadcast({ t: 'results', scores: this.scores(), winner, seconds: RESULTS_TIME });
+    this.broadcastLobby();
+    this.resultsTimer = setTimeout(() => {
+      this.toLobby();
+      this.broadcastLobby();
+    }, RESULTS_TIME * 1000);
+  }
+
+  scores(): Score[] {
+    return [...this.players.values()]
+      .map(({ id, name, kills, deaths, shots, hits }) => ({ id, name, kills, deaths, shots, hits }))
+      .sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
   }
 
   /** The spawn farthest from every other player we know the position of. */

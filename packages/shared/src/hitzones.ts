@@ -3,7 +3,8 @@ import { TANK_HEALTH } from './constants.ts';
 // Where a shell hits decides the damage and which part it can break (design doc, Damage table).
 
 export type Part = 'tracks' | 'engine' | 'turretRing' | 'gun' | 'optics';
-export type HitZone = 'front' | 'side' | 'rear' | 'turret' | 'barrel' | 'top';
+// 'hatch': a shell exploded within HATCH_KILL_RADIUS of an open hatch with the lookout in it.
+export type HitZone = 'front' | 'side' | 'rear' | 'turret' | 'barrel' | 'top' | 'hatch';
 
 export interface ZoneRule {
   damage: number;
@@ -18,6 +19,7 @@ export const HIT_ZONES: Record<HitZone, ZoneRule> = {
   turret: { damage: 25, part: 'turretRing', chance: 0.4 },
   barrel: { damage: 10, part: 'gun', chance: 1 },
   top: { damage: 40, part: 'optics', chance: 0.5 },
+  hatch: { damage: 1000, part: null, chance: 0 }, // instant kill
 };
 
 export const REPAIR_TIME: Record<Part, number> = {
@@ -35,6 +37,7 @@ export const ZONE_LABEL: Record<HitZone, string> = {
   turret: 'TURRET',
   barrel: 'GUN BARREL',
   top: 'TOP',
+  hatch: 'HEAD OUT OF THE HATCH',
 };
 
 export const PART_LABEL: Record<Part, string> = {

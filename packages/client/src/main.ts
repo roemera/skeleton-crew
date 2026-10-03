@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import {
-  PART_LABEL, PHYSICS_HZ, RENDER_HEIGHT, RENDER_WIDTH, SEAT_CODES, SEAT_CRAWLING, SHELL_SPEED, STATE_HZ,
-  ZONE_LABEL, generateMap, hullZone, type HitZone, type Part, type Phase, type ServerMsg,
+  HATCH_KILL_RADIUS, PART_LABEL, PHYSICS_HZ, RENDER_HEIGHT, RENDER_WIDTH, RESPAWN_DELAY, SEAT_CODES,
+  SEAT_CRAWLING, SHELL_SPEED, SPAWN_PROTECTION, STATE_HZ, ZONE_LABEL, generateMap, hullZone,
+  type HitZone, type Part, type Phase, type Score, type ServerMsg,
 } from '@skeleton-crew/shared';
 import { Pipeline } from './render/pipeline';
 import { World } from './world';
@@ -12,7 +13,8 @@ import { Seats, SEATS } from './seats/seats';
 import { Input } from './input';
 import { Hud, HUD_COLORS } from './ui/hud';
 import { Gun } from './sim/gun';
-import { Shells, type HitOutcome, type ShellHit } from './sim/shells';
+import { Shells, type HitOutcome, type Shell, type ShellHit } from './sim/shells';
+import type { ColliderRole } from './sim/tank';
 import { LoaderStation } from './ui/loader';
 import { Fx } from './fx';
 import { Audio } from './audio';
@@ -106,13 +108,54 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
   let phase: Phase = welcome?.phase ?? 'live';
   const playing = () => phase === 'live';
 
+  // Online combat state. The server owns health; we mirror ours and show what it tells us.
+  let dead: { killer: string; zone: string; until: number } | null = null;
+  let protectedUntil = 0, hurtAt = -10;
+  let scores: Score[] = [];
+  const names = new Map<number, string>();
+  const nameOf = (id: number) => names.get(id) ?? `TANK ${id}`;
+  const zeroScores = (players: Array<{ id: number; name: string }>) =>
+    players.map(({ id, name }) => ({ id, name, kills: 0, deaths: 0, shots: 0, hits: 0 }));
+  for (const p of welcome?.players ?? []) names.set(p.id, p.name);
+  scores = zeroScores(welcome?.players ?? []);
+  if (net && phase === 'live') protectedUntil = SPAWN_PROTECTION; // joined mid-match
+  /** You can drive and shoot: match live and not dead. */
+  const controlling = () => playing() && !dead;
+  const arr = (v: THREE.Vector3): [number, number, number] => [v.x, v.y, v.z];
+
   let message: { text: string; color: string; until: number } | null = null;
   const say = (text: string, color: string) => (message = { text, color, until: time + MESSAGE_TIME });
 
-  const shells = new Shells(physics, (_shell, hit) => onShellHit(hit));
+  const shells = new Shells(physics, (shell, hit) => onShellHit(shell, hit));
+
+  /** Which zone a hit on a tank is, from the collider it hit and the surface normal. */
+  function classifyZone(role: ColliderRole, body: { rotation(): { x: number; y: number; z: number; w: number } }, normal: THREE.Vector3): HitZone {
+    if (role === 'barrel') return 'barrel';
+    if (role === 'turret') return normal.y > 0.7 ? 'top' : 'turret';
+    // Surface normal in the hull's own frame.
+    const r = body.rotation();
+    const local = normal.clone().applyQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w).invert());
+    return hullZone(local.x, local.y, local.z);
+  }
+
+  /**
+   * Our shell exploded at `point`: report hits to the server. Any lookout with their head out within
+   * HATCH_KILL_RADIUS dies outright, whether or not the shell touched their tank.
+   */
+  function reportHits(shell: Shell, point: THREE.Vector3, direct: { id: number; zone: HitZone } | null) {
+    if (!net || !remotes || shell.visual) return;
+    const hatch = new THREE.Vector3();
+    for (const r of remotes.byId.values()) {
+      if (r.dead || SEAT_CODES[r.seat] !== 'lookout') continue;
+      if (remotes.hatchPos(r, hatch).distanceTo(point) > HATCH_KILL_RADIUS) continue;
+      net.sendHit(shell.id, r.id, 'hatch', arr(point));
+      if (direct?.id === r.id) direct = null;
+    }
+    if (direct) net.sendHit(shell.id, direct.id, direct.zone, arr(point));
+  }
 
   /** Decide what a shell hit does. Fences and trees break and let it through; everything else stops it. */
-  function onShellHit(hit: ShellHit): HitOutcome {
+  function onShellHit(shell: Shell, hit: ShellHit): HitOutcome {
     const broken = world.shellHit(hit.collider.handle, hit.dir);
     if (broken && broken.kind !== 'wall') return 'pass';
     const remote = remotes?.find(hit.collider) ?? null;
@@ -120,20 +163,14 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
     if (!broken && hit.collider.isSensor() && !found && !remote) return 'pass'; // some other sensor
     fx.explosion(hit.point, found || remote ? 1.2 : 1);
     audio.play('explosion', { pos: hit.point });
-    if (remote) audio.play('impact', { pos: hit.point }); // damage over the network comes in milestone 4
+    if (remote) audio.play('impact', { pos: hit.point });
+    const direct = remote && !remote.remote.dead ? { id: remote.remote.id, zone: classifyZone(remote.role, remote.remote.sim.body, hit.normal) } : null;
+    reportHits(shell, hit.point, direct);
     if (found && targets) {
       audio.play('impact', { pos: hit.point });
       const { target, role } = found;
       if (target.deadFor > 0) return 'stop';
-      let zone: HitZone;
-      if (role === 'barrel') zone = 'barrel';
-      else if (role === 'turret') zone = hit.normal.y > 0.7 ? 'top' : 'turret';
-      else {
-        // Surface normal in the target's hull frame.
-        const r = target.sim.body.rotation();
-        const local = hit.normal.clone().applyQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w).invert());
-        zone = hullZone(local.x, local.y, local.z);
-      }
+      const zone = classifyZone(role, target.sim.body, hit.normal);
       const res = target.sim.damage.applyHit(zone, Math.random());
       if (res.broke) target.sim.onPartBroken(res.broke);
       let text = `HIT ${ZONE_LABEL[res.zone]} -${res.damage}`;
@@ -150,6 +187,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
   let lastHit: { zone: HitZone; damage: number; broke: Part | null; destroyed: boolean } | null = null;
 
   function fire() {
+    if (!controlling()) return;
     if (tank.isBroken('gun')) {
       audio.play('dry');
       say('GUN BROKEN', HUD_COLORS.red);
@@ -163,7 +201,9 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
     const pos = new THREE.Vector3(), dir = new THREE.Vector3();
     tank.muzzle(pos, dir);
     const v = tank.body.linvel();
-    shells.spawn(pos, dir.clone().multiplyScalar(SHELL_SPEED).add(new THREE.Vector3(v.x, v.y, v.z)), tank.body);
+    const vel = dir.clone().multiplyScalar(SHELL_SPEED).add(new THREE.Vector3(v.x, v.y, v.z));
+    const shell = shells.spawn(pos, vel, tank.body);
+    net?.sendFire(shell.id, arr(pos), arr(vel));
     tank.recoil(dir, RECOIL_IMPULSE);
     fx.muzzleFlash(pos, dir);
     audio.play('cannon');
@@ -186,7 +226,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
 
   addEventListener('mousedown', () => {
     audio.unlock();
-    if (playing() && seats.current !== 'loader') input.lock();
+    if (controlling() && seats.current !== 'loader') input.lock();
   });
 
   // --- Network ---
@@ -198,13 +238,22 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
     else menu.hide();
     net.onMessage = (msg) => {
       if (msg.t === 'lobby') {
+        for (const p of msg.players) names.set(p.id, p.name);
+        if (msg.phase === 'live' && phase !== 'live') {
+          // New match: fresh scores, and every wreck from the last one is back in action.
+          scores = zeroScores(msg.players);
+          for (const id of remotes.byId.keys()) remotes.respawn(id);
+        }
         phase = msg.phase;
         if (phase === 'live') menu.hide();
-        else {
+        else if (phase !== 'results') {
+          dead = null;
           input.unlock();
           showLobby(msg.players, msg.countdown);
         }
       } else if (msg.t === 'spawn') {
+        dead = null;
+        protectedUntil = time + SPAWN_PROTECTION;
         const sp = map.spawns[msg.spawn];
         tank.teleport(sp, map.heightAt(sp.x, sp.z));
         tank.damage.reset();
@@ -214,6 +263,50 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
         say('GO GO GO', HUD_COLORS.lime);
       } else if (msg.t === 'left') {
         remotes.remove(msg.id);
+      } else if (msg.t === 'fire') {
+        // Someone else's shot: draw it and let it explode here; they report its hits.
+        const pos = new THREE.Vector3(...msg.pos), vel = new THREE.Vector3(...msg.vel);
+        shells.spawn(pos, vel, remotes.byId.get(msg.from)?.sim.body, true);
+        fx.muzzleFlash(pos, vel.clone().normalize());
+        audio.play('cannon', { pos });
+      } else if (msg.t === 'damage') {
+        const what = `${ZONE_LABEL[msg.zone]} -${msg.damage}${msg.broke ? ` ${PART_LABEL[msg.broke]} BROKEN` : ''}`;
+        if (msg.target === net.id) {
+          tank.damage.health = msg.health;
+          if (msg.broke) {
+            tank.damage.breakPart(msg.broke);
+            tank.onPartBroken(msg.broke);
+          }
+          hurtAt = time;
+          audio.play('impact', { volume: 1.5, rate: 0.7 });
+          say(`HIT BY ${nameOf(msg.attacker)}: ${what}`, HUD_COLORS.red);
+        } else if (msg.attacker === net.id) {
+          say(`HIT ${nameOf(msg.target)}: ${what}`, HUD_COLORS.yellow);
+          lastHit = { zone: msg.zone, damage: msg.damage, broke: msg.broke, destroyed: msg.health <= 0 };
+        }
+      } else if (msg.t === 'kill') {
+        scores = msg.scores;
+        const killer = nameOf(msg.killer), victim = nameOf(msg.victim);
+        if (msg.victim === net.id) {
+          dead = { killer, zone: ZONE_LABEL[msg.zone], until: time + RESPAWN_DELAY };
+          tank.centreSteer();
+          tank.throttleIdx = 2; // stop
+          const p = tank.body.translation();
+          fx.fire(new THREE.Vector3(p.x, p.y + 1.2, p.z), RESPAWN_DELAY);
+          audio.play('explosion', { volume: 1.5 });
+        } else {
+          remotes.kill(msg.victim);
+          const r = remotes.byId.get(msg.victim);
+          if (r) fx.fire(r.model.root.position.clone().add(new THREE.Vector3(0, 1.2, 0)), RESPAWN_DELAY);
+          say(msg.killer === net.id ? `YOU KILLED ${victim}` : `${killer} KILLED ${victim}`, msg.killer === net.id ? HUD_COLORS.lime : HUD_COLORS.white);
+        }
+      } else if (msg.t === 'respawn') {
+        if (msg.id !== net.id) remotes.respawn(msg.id);
+      } else if (msg.t === 'results') {
+        scores = msg.scores;
+        dead = null;
+        input.unlock();
+        menu.results(msg.scores, msg.winner, msg.seconds, net.id);
       }
     };
     net.onState = (st) => remotes.receive(st, time);
@@ -245,7 +338,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
   let acc = 0, last = performance.now() / 1000, time = 0;
 
   function handleInput() {
-    if (!playing()) {
+    if (!controlling()) {
       // Lobby/countdown: tank parked, input ignored.
       input.takePresses();
       input.takeClicks();
@@ -413,6 +506,11 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
       gun,
       loader,
       message,
+      scores: net && input.isHeld('Tab') ? scores : null,
+      myId: net?.id ?? 0,
+      dead: dead && { killer: dead.killer, zone: dead.zone, respawnIn: dead.until - time },
+      protectedFor: Math.max(0, protectedUntil - time),
+      hurt: Math.max(0, 1 - (time - hurtAt) / 0.6),
     });
     requestAnimationFrame(frame);
   }
@@ -422,6 +520,8 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
   (window as unknown as { __game: unknown }).__game = {
     THREE, tank, seats, map, physics, look, world, gun, targets, remotes, shells, fire, net,
     get phase() { return phase; },
+    get dead() { return dead; },
+    get scores() { return scores; },
     /** Point the gun at a world position, compensating for hull tilt and shell drop (for tests). */
     aimAt(x: number, y: number, z: number) {
       tank.pose(hullPos, hullQuat);

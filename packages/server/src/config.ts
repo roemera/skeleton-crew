@@ -27,5 +27,6 @@ export function loadConfig(root: string): Config {
     ...(env.PORT ? { port: Number(env.PORT) } : {}),
     ...(env.PASSWORD !== undefined ? { password: env.PASSWORD } : {}),
     ...(env.MAP_SEED ? { mapSeed: Number(env.MAP_SEED) } : {}),
+    ...(env.KILL_LIMIT ? { killLimit: Number(env.KILL_LIMIT) } : {}),
   };
 }

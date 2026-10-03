@@ -27,7 +27,11 @@ export interface Remote {
   head: THREE.Mesh; // pokes out of the hatch when that player is lookout
   engine: Loop;
   snaps: Snap[];
+  seat: number;
+  dead: boolean;
 }
+
+const WRECK = new THREE.MeshLambertMaterial({ color: 0x110011 });
 
 export class Remotes {
   readonly byId = new Map<number, Remote>();
@@ -57,7 +61,7 @@ export class Remotes {
     model.turret.add(head);
     this.scene.add(model.root);
     const engine = this.audio.loop('engine', new THREE.Vector3(...s.pos));
-    const r: Remote = { id: s.id, sim, model, head, engine, snaps: [] };
+    const r: Remote = { id: s.id, sim, model, head, engine, snaps: [], seat: s.seat, dead: false };
     this.byId.set(s.id, r);
     return r;
   }
@@ -73,6 +77,38 @@ export class Remotes {
 
   clear() {
     for (const id of [...this.byId.keys()]) this.remove(id);
+  }
+
+  /** Destroyed: black wreck, engine off, until `respawn`. */
+  kill(id: number) {
+    const r = this.byId.get(id);
+    if (!r) return;
+    r.dead = true;
+    r.engine.setVolume(0);
+    r.head.visible = false;
+    r.model.root.traverse((o) => {
+      if (o instanceof THREE.Mesh && o !== r.head) {
+        o.userData.mat ??= o.material;
+        o.material = WRECK;
+      }
+    });
+  }
+
+  /** Back from the dead at a new spawn: drop old positions so it doesn't slide across the map. */
+  respawn(id: number) {
+    const r = this.byId.get(id);
+    if (!r) return;
+    r.dead = false;
+    r.snaps.length = 0;
+    r.engine.setVolume(1);
+    r.model.root.traverse((o) => {
+      if (o instanceof THREE.Mesh && o.userData.mat) o.material = o.userData.mat;
+    });
+  }
+
+  /** World position of a remote tank's hatch (where the lookout's head is). */
+  hatchPos(r: Remote, out = new THREE.Vector3()) {
+    return r.model.turret.localToWorld(out.set(0.5, 0.75, 0.4));
   }
 
   /** Find the remote tank a collider belongs to. */
@@ -119,7 +155,8 @@ export class Remotes {
       r.model.root.quaternion.copy(quat);
       r.model.turret.rotation.y = yaw;
       r.model.gun.rotation.x = pitch;
-      r.head.visible = SEAT_CODES[seat] === 'lookout';
+      r.seat = seat;
+      r.head.visible = SEAT_CODES[seat] === 'lookout' && !r.dead;
       // Cursed but cheap: both tracks scroll at hull speed.
       const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
       const v = s[s.length - 1].vel.dot(fwd);

@@ -1,4 +1,4 @@
-import type { Phase, PlayerInfo } from '@skeleton-crew/shared';
+import type { Phase, PlayerInfo, Score } from '@skeleton-crew/shared';
 
 // Join screen and lobby: plain HTML over the game canvas, styled to hurt a little.
 
@@ -110,9 +110,36 @@ export class Menu {
     this.root.querySelector('button.start')?.addEventListener('click', onStart);
   }
 
+  /** End of match: who won, the table, and how long until the lobby. */
+  results(scores: Score[], winner: number, seconds: number, myId: number) {
+    this.root.classList.add('see-through');
+    this.root.style.display = 'flex';
+    const name = scores.find((s) => s.id === winner)?.name ?? '???';
+    const rows = scores
+      .map((s) => `<li class="${s.id === winner ? 'ready' : ''}">${s.id === myId ? '&gt; ' : ''}${escape(s.name)} - ${s.kills} KILLS, ${s.deaths} DEATHS, ${accuracy(s)} HIT</li>`)
+      .join('');
+    this.root.innerHTML = `
+      <div class="box">
+        <h1>${winner === myId ? 'YOU WIN. SOMEHOW.' : `${escape(name)} WINS`}</h1>
+        <ul>${rows}</ul>
+        <div class="note">BACK TO THE LOBBY IN <span class="secs">${seconds}</span>...</div>
+      </div>`;
+    const el = this.root.querySelector('.secs')!;
+    let left = seconds;
+    const timer = setInterval(() => {
+      left--;
+      if (!el.isConnected || left < 0) return clearInterval(timer);
+      el.textContent = String(left);
+    }, 1000);
+  }
+
   hide() {
     this.root.style.display = 'none';
   }
+}
+
+export function accuracy(s: Score) {
+  return s.shots ? `${Math.round((100 * s.hits) / s.shots)}%` : '-';
 }
 
 function escape(s: string) {
