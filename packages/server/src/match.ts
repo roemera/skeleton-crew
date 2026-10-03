@@ -1,5 +1,5 @@
 import {
-  COUNTDOWN_SECONDS, MAX_PLAYERS, RESPAWN_DELAY, RESULTS_TIME, SEAT_CODES, SPAWN_PROTECTION, TankDamage, generateMap,
+  COUNTDOWN_SECONDS, MAX_PLAYERS, RESPAWN_DELAY, RESULTS_TIME, SPAWN_PROTECTION, TankDamage, generateMap,
   type ClientMsg, type Phase, type PlayerInfo, type Score, type ServerMsg, type Spawn,
 } from '@skeleton-crew/shared';
 
@@ -8,7 +8,6 @@ export interface Player {
   name: string;
   ready: boolean;
   pos: [number, number, number] | null; // last reported position, for picking spawns
-  seat: number; // last reported seat (SEAT_CODES index): the server checks lookout kills itself
   send(msg: ServerMsg): void;
   // Combat (the server owns health; clients report their own shells' hits)
   damage: TankDamage;
@@ -58,7 +57,7 @@ export class Match {
 
   join(name: string, send: Player['send']): Player {
     const p: Player = {
-      id: this.freeId(), name: name.slice(0, 16) || 'TANK', ready: false, pos: null, seat: 0, send,
+      id: this.freeId(), name: name.slice(0, 16) || 'TANK', ready: false, pos: null, send,
       damage: new TankDamage(), alive: true, protectedUntil: Date.now() + SPAWN_PROTECTION * 1000,
       kills: 0, deaths: 0, shots: 0, hits: 0, hitShells: new Set(), respawnTimer: null,
     };
@@ -156,10 +155,7 @@ export class Match {
   hit(from: Player, msg: Hit) {
     const target = this.players.get(msg.target);
     if (this.phase !== 'live' || !target || target === from || !target.alive || Date.now() < target.protectedUntil) return;
-    // The lookout rule is checked here from the seat the target last reported.
-    const lookout = SEAT_CODES[target.seat] === 'lookout';
-    if (msg.zone === 'man' && !lookout) return; // bullets bounce off tanks
-    const zone = msg.zone !== 'man' && lookout ? 'hatch' : msg.zone; // any shell hit with the lookout out kills
+    const zone = msg.zone;
     const res = target.damage.applyHit(zone, Math.random());
     if (zone !== 'man' && !from.hitShells.has(msg.shell)) {
       from.hitShells.add(msg.shell);

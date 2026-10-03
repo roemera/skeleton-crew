@@ -2,7 +2,7 @@ import type { HitZone, Part } from './hitzones.ts';
 
 // Network messages. Rare messages are JSON; the 20 Hz tank state is a 52-byte binary packet.
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 export const DEFAULT_PORT = 8080;
 export const STATE_HZ = 20;
 export const MAX_PLAYERS = 8;
@@ -51,12 +51,9 @@ export type ServerMsg =
 
 // --- Binary tank state ---
 
-export const SEAT_CODES = ['driver', 'gunner', 'loader', 'lookout'] as const;
-export const SEAT_CRAWLING = 255;
-
 export interface TankState {
   id: number; // set by the server when relaying; clients send 0
-  seat: number; // index into SEAT_CODES, or SEAT_CRAWLING
+  flags: number; // reserved, send 0
   pos: [number, number, number];
   quat: [number, number, number, number];
   vel: [number, number, number];
@@ -72,7 +69,7 @@ export function encodeState(s: TankState): ArrayBuffer {
   const v = new DataView(buf);
   v.setUint8(0, KIND_STATE);
   v.setUint8(1, s.id);
-  v.setUint8(2, s.seat);
+  v.setUint8(2, s.flags);
   const f = [...s.pos, ...s.quat, ...s.vel, s.turretYaw, s.gunPitch];
   f.forEach((x, i) => v.setFloat32(4 + i * 4, x, true));
   return buf;
@@ -85,7 +82,7 @@ export function decodeState(data: ArrayBuffer | Uint8Array): TankState | null {
   const f = (i: number) => v.getFloat32(4 + i * 4, true);
   return {
     id: v.getUint8(1),
-    seat: v.getUint8(2),
+    flags: v.getUint8(2),
     pos: [f(0), f(1), f(2)],
     quat: [f(3), f(4), f(5), f(6)],
     vel: [f(7), f(8), f(9)],

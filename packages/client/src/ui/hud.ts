@@ -1,10 +1,7 @@
-import { PART_LABEL, RENDER_HEIGHT as H, RENDER_WIDTH as W, STORAGE_SIZE, THROTTLE_STEPS, TANK_HEALTH } from '@skeleton-crew/shared';
-import type { Seat, Seats } from '../seats/seats';
+import { PART_LABEL, RENDER_HEIGHT as H, RENDER_WIDTH as W, TANK_HEALTH, type Score } from '@skeleton-crew/shared';
 import type { TankSim } from '../sim/tank';
 import type { Gun } from '../sim/gun';
-import { BREECH, LoaderStation, RACK, SHELL } from './loader';
 import { accuracy } from './menu';
-import type { Score } from '@skeleton-crew/shared';
 import { drawText } from './font';
 
 // Garish palette.
@@ -20,22 +17,18 @@ const C = {
   purple: '#5b0fa8',
 };
 
-export const SEAT_LABEL: Record<Seat, string> = { driver: 'DRIVER', gunner: 'GUNNER', loader: 'LOADER', lookout: 'LOOKOUT' };
 const THROTTLE_LABEL = ['R FULL', 'R 1/2', 'STOP', '1/4', '1/2', 'FULL'];
 
 export interface HudState {
-  seats: Seats;
   tank: TankSim;
   time: number;
   locked: boolean;
   everLocked: boolean; // the full instructions show only until the first time you climb in
+  sighting: boolean; // right mouse held: looking down the gun sight
   fovDeg: number; // vertical fov of the current view
-  zoomLabel: string;
-  heading: number; // degrees, hull forward, 0 = north (-z)
-  viewHeading: number; // degrees, where the camera looks
-  mouse: [number, number];
+  viewHeading: number; // degrees, where the camera looks (0 = north)
+  gunMark: [number, number] | null; // where the gun points, in HUD pixels (head-out view)
   gun: Gun;
-  loader: LoaderStation;
   message: { text: string; color: string } | null; // short-lived feedback ("HIT SIDE HULL")
   scores: Score[] | null; // shown while Tab is held (online only)
   myId: number;
@@ -49,135 +42,90 @@ export const HUD_COLORS = C;
 
 export class Hud {
   private ctx: CanvasRenderingContext2D;
-  private quilt: CanvasPattern;
 
   constructor(canvas: HTMLCanvasElement) {
     canvas.width = W;
     canvas.height = H;
     this.ctx = canvas.getContext('2d')!;
     this.ctx.imageSmoothingEnabled = false;
-    // Padded neon wall: diamond quilting.
-    const q = document.createElement('canvas');
-    q.width = q.height = 8;
-    const qc = q.getContext('2d')!;
-    qc.fillStyle = C.pink;
-    qc.fillRect(0, 0, 8, 8);
-    qc.fillStyle = C.pinkDark;
-    for (let i = 0; i < 8; i++) {
-      qc.fillRect(i, i, 1, 1);
-      qc.fillRect(7 - i, i, 1, 1);
-    }
-    this.quilt = this.ctx.createPattern(q, 'repeat')!;
   }
 
   draw(s: HudState) {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, W, H);
-    const seat = s.seats.current;
     if (s.dead) {
-      // The death camera fills the screen; no seat view.
-    } else if (seat === null) this.drawCrawl(s);
-    else if (seat === 'driver') this.drawDriver(s);
-    else if (seat === 'gunner') this.drawGunner(s);
-    else if (seat === 'loader') this.drawLoader(s);
-    else this.drawLookout(s);
-    if (seat !== null && !s.dead) this.drawDamage(s);
-    if (s.hurt > 0) {
-      ctx.fillStyle = `rgba(255,31,61,${(0.6 * s.hurt).toFixed(2)})`;
-      for (const [x, y, w, h] of [[0, 0, W, 8], [0, H - 8, W, 8], [0, 0, 8, H], [W - 8, 0, 8, H]]) ctx.fillRect(x, y, w, h);
+      this.drawDead(s);
+    } else {
+      if (s.sighting) this.drawSight(s);
+      else this.drawHeadOut(s);
+      this.drawDamage(s);
+      this.drawDashboard(s);
+      this.drawReload(s);
+      if (s.hurt > 0) {
+        ctx.fillStyle = `rgba(255,31,61,${(0.6 * s.hurt).toFixed(2)})`;
+        for (const [x, y, w, h] of [[0, 0, W, 8], [0, H - 8, W, 8], [0, 0, 8, H], [W - 8, 0, 8, H]]) ctx.fillRect(x, y, w, h);
+      }
+      if (s.protectedFor > 0) {
+        ctx.fillStyle = C.black;
+        ctx.fillRect(176, 18, 128, 11);
+        drawText(ctx, `SPAWN PROTECTION ${Math.ceil(s.protectedFor)}S`, 240, 21, C.cyan, 1, 'center');
+      }
+      if (s.message) {
+        const w = s.message.text.length * 4 + 6;
+        ctx.fillStyle = C.black;
+        ctx.fillRect(240 - w / 2, 210, w, 11);
+        drawText(ctx, s.message.text, 240, 213, s.message.color, 1, 'center');
+      }
+      if (s.subtitle) {
+        const w = s.subtitle.length * 4 + 6;
+        ctx.fillStyle = C.black;
+        ctx.fillRect(240 - w / 2, 224, w, 10);
+        drawText(ctx, s.subtitle, 240, 226, C.white, 1, 'center');
+      }
     }
-    if (s.protectedFor > 0 && !s.dead) {
-      ctx.fillStyle = C.black;
-      ctx.fillRect(176, 18, 128, 11);
-      drawText(ctx, `SPAWN PROTECTION ${Math.ceil(s.protectedFor)}S`, 240, 21, C.cyan, 1, 'center');
-    }
-    if (s.message && seat !== null) {
-      const w = s.message.text.length * 4 + 6;
-      ctx.fillStyle = C.black;
-      ctx.fillRect(240 - w / 2, 222, w, 11);
-      drawText(ctx, s.message.text, 240, 225, s.message.color, 1, 'center');
-    }
-    this.drawSeatBar(s);
-    if (s.subtitle && !s.dead) {
-      const w = s.subtitle.length * 4 + 6;
-      ctx.fillStyle = C.black;
-      ctx.fillRect(240 - w / 2, 236, w, 10);
-      drawText(ctx, s.subtitle, 240, 238, C.white, 1, 'center');
-    }
-    if (s.dead) this.drawDead(s);
     if (s.scores) this.drawScores(s.scores, s.myId);
-    if (!s.locked && seat !== 'loader') {
+    if (!s.locked) {
       if (s.everLocked) this.drawGrabMouse();
       else this.drawClickToPlay();
     }
   }
 
-  // --- Driver: a narrow slit in a padded pink wall, levers below ---
-  private drawDriver(s: HudState) {
+  /** Head out of the hatch: compass, where you look, where the gun points. */
+  private drawHeadOut(s: HudState) {
     const ctx = this.ctx;
-    const slit = { x: 60, y: 62, w: 360, h: 44 };
-    ctx.fillStyle = this.quilt;
-    ctx.fillRect(0, 0, W, H);
-    ctx.clearRect(slit.x, slit.y, slit.w, slit.h);
-    // hazard frame round the slit
-    ctx.fillStyle = C.yellow;
-    ctx.fillRect(slit.x - 4, slit.y - 4, slit.w + 8, 4);
-    ctx.fillRect(slit.x - 4, slit.y + slit.h, slit.w + 8, 4);
-    ctx.fillRect(slit.x - 4, slit.y, 4, slit.h);
-    ctx.fillRect(slit.x + slit.w, slit.y, 4, slit.h);
+    // Compass strip
     ctx.fillStyle = C.black;
-    for (let x = slit.x - 4; x < slit.x + slit.w + 4; x += 8) {
-      ctx.fillRect(x, slit.y - 4, 4, 4);
-      ctx.fillRect(x + 4, slit.y + slit.h, 4, 4);
-    }
-
-    // Dashboard
-    ctx.fillStyle = C.purple;
-    ctx.fillRect(16, 128, 448, 122);
-    ctx.fillStyle = C.black;
-    ctx.fillRect(20, 132, 440, 114);
-
-    // Throttle lever: vertical slot with notches.
-    const tx = 70, ty0 = 150, tStep = 16;
-    drawText(ctx, 'THROTTLE W/S', tx, 136, C.yellow, 1, 'center');
-    ctx.fillStyle = C.purple;
-    ctx.fillRect(tx - 2, ty0, 4, tStep * (THROTTLE_STEPS.length - 1) + 4);
-    for (let i = 0; i < THROTTLE_STEPS.length; i++) {
-      const y = ty0 + (THROTTLE_STEPS.length - 1 - i) * tStep;
-      const on = i === s.tank.throttleIdx;
-      drawText(ctx, THROTTLE_LABEL[i], tx + 12, y, on ? C.lime : C.pink);
-      if (on) {
+    ctx.fillRect(140, 4, 200, 12);
+    const names: Record<number, string> = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' };
+    for (let hdg = 0; hdg < 360; hdg += 5) {
+      const diff = ((hdg - s.viewHeading + 540) % 360) - 180;
+      if (Math.abs(diff) > 96) continue;
+      const x = Math.round(240 + diff);
+      if (names[hdg] !== undefined) drawText(ctx, names[hdg], x, 7, C.yellow, 1, 'center');
+      else if (hdg % 15 === 0) {
         ctx.fillStyle = C.lime;
-        ctx.fillRect(tx - 8, y - 1, 16, 7);
+        ctx.fillRect(x, 9, 1, 3);
       }
     }
-
-    // Steering lever: horizontal slot, 9 notches.
-    const sx = 240, sy = 172;
-    drawText(ctx, 'STEER A/D  X=CENTRE', sx, 136, C.yellow, 1, 'center');
-    ctx.fillStyle = C.purple;
-    ctx.fillRect(sx - 66, sy, 132, 4);
-    for (let i = -4; i <= 4; i++) {
-      ctx.fillStyle = i === 0 ? C.yellow : C.pink;
-      ctx.fillRect(sx + i * 16 - 1, sy + 7, 2, i === 0 ? 6 : 3);
+    // Where you look: a small dot.
+    ctx.fillStyle = C.black;
+    ctx.fillRect(239, 134, 3, 3);
+    ctx.fillStyle = C.white;
+    ctx.fillRect(240, 135, 1, 1);
+    // Where the gun points (the turret lags your gaze at 24 deg/s): a ring.
+    if (s.gunMark) {
+      const [gx, gy] = s.gunMark.map(Math.round);
+      ctx.strokeStyle = s.gun.ready ? C.lime : C.red;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(gx - 5, gy - 5, 11, 11);
+      ctx.fillStyle = C.black;
+      ctx.fillRect(gx, gy - 2, 1, 5);
+      ctx.fillRect(gx - 2, gy, 5, 1);
     }
-    const knob = sx + s.tank.steer * 64;
-    ctx.fillStyle = C.lime;
-    ctx.fillRect(knob - 4, sy - 8, 8, 20);
-    drawText(ctx, 'L', sx - 74, sy, C.pink);
-    drawText(ctx, 'R', sx + 72, sy, C.pink);
-    if (s.tank.brake) drawText(ctx, 'BRAKE', sx, 200, C.red, 2, 'center');
-
-    // Speed + heading
-    const kmh = Math.round(Math.abs(s.tank.speed) * 3.6);
-    drawText(ctx, String(kmh).padStart(2, '0'), 400, 150, C.cyan, 4, 'center');
-    drawText(ctx, 'KM/H', 400, 174, C.cyan, 1, 'center');
-    drawText(ctx, 'HDG ' + String(Math.round(s.heading)).padStart(3, '0'), 400, 196, C.yellow, 1, 'center');
-    if (s.tank.grounded < 0.3) drawText(ctx, 'AIRBORNE?!', 400, 210, C.red, 1, 'center');
   }
 
-  // --- Gunner: a round sight, everything else black ---
-  private drawGunner(s: HudState) {
+  /** Right mouse: down the gun sight. A round sight, everything else black. */
+  private drawSight(s: HudState) {
     const ctx = this.ctx;
     const cx = W / 2, cy = H / 2 - 6, r = 112;
     ctx.fillStyle = C.black;
@@ -190,8 +138,7 @@ export class Hud {
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.stroke();
-
-    // Reticle: chevron + stadia line + range marks for shell drop. Dark, to read on bright ground.
+    // Reticle: chevron + stadia line + range ticks for shell drop. Dark, to read on bright ground.
     ctx.fillStyle = C.black;
     ctx.fillRect(cx - 60, cy, 50, 1);
     ctx.fillRect(cx + 10, cy, 50, 1);
@@ -200,48 +147,42 @@ export class Hud {
       ctx.fillRect(cx + i, cy + i, 1, 1);
     }
     const pxPerRad = H / ((s.fovDeg * Math.PI) / 180);
-    for (const m of [200, 400, 600, 800, 1000]) {
+    for (const m of [100, 200, 300, 400]) {
       const drop = (9.81 * m) / (2 * 600 * 600); // small-angle shell drop, rad
-      const y = Math.round(cy + drop * pxPerRad) + 8;
-      ctx.fillRect(cx - 3, y, 7, 1);
+      ctx.fillRect(cx - 3, Math.round(cy + drop * pxPerRad) + 8, 7, 1);
     }
-
-    // Commanded aim (turret lags behind the mouse at 24 deg/s).
-    const dYaw = s.tank.turretYawCmd - s.tank.turretYaw;
-    const dPitch = s.tank.gunPitchCmd - s.tank.gunPitch;
-    const ax = cx - dYaw * pxPerRad, ay = cy - dPitch * pxPerRad;
-    if (Math.hypot(ax - cx, ay - cy) > 2) {
-      ctx.strokeStyle = C.pink;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(Math.round(Math.max(cx - r, Math.min(cx + r, ax))) - 3, Math.round(Math.max(cy - r, Math.min(cy + r, ay))) - 3, 7, 7);
-    }
-
-    // Turret direction relative to the hull.
-    const hx = 46, hy = 222;
-    ctx.fillStyle = C.purple;
-    ctx.fillRect(hx - 7, hy - 12, 14, 24);
-    ctx.strokeStyle = C.yellow;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(hx, hy);
-    ctx.lineTo(hx - Math.sin(s.tank.turretYaw) * 18, hy - Math.cos(s.tank.turretYaw) * 18);
-    ctx.stroke();
-    drawText(ctx, 'TURRET', hx, 240, C.yellow, 1, 'center');
-
-    const elev = (s.tank.gunPitch * 180) / Math.PI;
-    drawText(ctx, 'ELEV ' + (elev >= 0 ? '+' : '') + elev.toFixed(1), 380, 214, C.lime);
-    drawText(ctx, 'ZOOM ' + s.zoomLabel + ' (RMB)', 380, 224, C.lime);
-    const g = s.gun;
-    const [status, color] = s.tank.isBroken('gun')
-      ? ['GUN BROKEN', C.red]
-      : g.ready
-        ? ['READY - LMB FIRE', C.lime]
-        : g.shellInBreech
-          ? ['LOADED, BREECH OPEN', C.yellow]
-          : ['EMPTY - GO LOAD', C.red];
-    drawText(ctx, status, 380, 234, color);
-    drawText(ctx, 'MMB MACHINE GUN', 380, 244, C.cyan);
     if (s.tank.isBroken('optics')) this.drawStatic(cx - r, cy - r, r * 2, r * 2, s.time);
+  }
+
+  /** Bottom left: what your levers are set to, speed, and the controls. */
+  private drawDashboard(s: HudState) {
+    const ctx = this.ctx;
+    const t = s.tank;
+    ctx.fillStyle = C.black;
+    ctx.fillRect(4, H - 30, 150, 26);
+    const steer = t.steer === 0 ? '--' : (t.steer < 0 ? '<' : '>').repeat(Math.round(Math.abs(t.steer) * 4));
+    drawText(ctx, `THR ${THROTTLE_LABEL[t.throttleIdx]}  STR ${steer}`, 8, H - 26, C.cyan);
+    const kmh = Math.round(Math.abs(t.speed) * 3.6);
+    drawText(ctx, `${String(kmh).padStart(2, '0')} KM/H`, 8, H - 17, C.lime);
+    if (t.brake) drawText(ctx, 'BRAKE', 60, H - 17, C.red);
+    if (t.grounded < 0.3) drawText(ctx, 'AIRBORNE?!', 92, H - 17, C.red);
+    drawText(ctx, 'W/S A/D X SPACE', 8, H - 9, C.purple);
+  }
+
+  /** Bottom centre: the gun reloads itself. */
+  private drawReload(s: HudState) {
+    const ctx = this.ctx;
+    const g = s.gun, broken = s.tank.isBroken('gun');
+    const x = 190, y = H - 14, w = 100;
+    ctx.fillStyle = C.black;
+    ctx.fillRect(x - 2, y - 11, w + 4, 21);
+    const [label, color] = broken ? ['GUN BROKEN', C.red] : g.ready ? ['READY', C.lime] : ['RELOADING', C.yellow];
+    drawText(ctx, label, x + w / 2, y - 8, color, 1, 'center');
+    ctx.fillStyle = C.purple;
+    ctx.fillRect(x, y, w, 4);
+    ctx.fillStyle = g.ready && !broken ? C.lime : C.yellow;
+    ctx.fillRect(x, y, Math.round(w * g.reloadProgress), 4);
+    drawText(ctx, 'LMB CANNON  MMB MG  RMB SIGHT', 472, H - 9, C.purple, 1, 'right');
   }
 
   /** Broken optics: snow over the sight. */
@@ -255,7 +196,7 @@ export class Hud {
     }
   }
 
-  /** Health and broken parts: warning lights, shown in every seat. */
+  /** Health and broken parts: warning lights. */
   private drawDamage(s: HudState) {
     const ctx = this.ctx;
     const d = s.tank.damage;
@@ -273,175 +214,6 @@ export class Hud {
     }
   }
 
-  // --- Loader: no view outside. Shell rack and breech. ---
-  private drawLoader(s: HudState) {
-    const ctx = this.ctx;
-    const g = s.gun, ld = s.loader;
-    ctx.fillStyle = this.quilt;
-    ctx.fillRect(0, 0, W, H);
-    // flickering tube light
-    const flick = Math.floor(s.time * 12) % 7 === 0;
-    ctx.fillStyle = flick ? C.white : C.cyan;
-    ctx.fillRect(140, 8, 200, 6);
-
-    // Rack: shells fill from the top.
-    ctx.fillStyle = C.black;
-    ctx.fillRect(RACK.x, RACK.y, RACK.w, RACK.h);
-    drawText(ctx, 'RACK', RACK.x + RACK.w / 2, 30, C.yellow, 2, 'center');
-    for (let i = 0; i < 6; i++) {
-      const r = LoaderStation.slot(i);
-      const held = ld.dragging && i === g.rack - 1;
-      if (i < g.rack && !held) this.drawShell(r.x, r.y);
-      else {
-        ctx.fillStyle = C.purple;
-        ctx.fillRect(r.x, r.y + 5, r.w + 18, 4);
-      }
-    }
-    // Refill from storage
-    ctx.fillStyle = C.purple;
-    ctx.fillRect(RACK.x + 10, RACK.y + RACK.h - 8, RACK.w - 20, 4);
-    ctx.fillStyle = C.lime;
-    ctx.fillRect(RACK.x + 10, RACK.y + RACK.h - 8, Math.round((RACK.w - 20) * g.refillProgress), 4);
-    drawText(ctx, `RACK ${g.rack}   STORE ${g.storage}/${STORAGE_SIZE}`, RACK.x + RACK.w / 2, 220, C.white, 1, 'center');
-
-    // Breech
-    ctx.fillStyle = '#3a3a3a';
-    ctx.fillRect(BREECH.x, BREECH.y, BREECH.w, BREECH.h);
-    ctx.fillStyle = C.lime;
-    ctx.fillRect(BREECH.x, BREECH.y, BREECH.w, 4);
-    ctx.fillStyle = C.black;
-    ctx.beginPath();
-    ctx.arc(BREECH.cx, BREECH.cy, BREECH.r, 0, Math.PI * 2);
-    ctx.fill();
-    if (g.shellInBreech) {
-      // shell base seen end-on
-      ctx.fillStyle = C.yellow;
-      ctx.beginPath();
-      ctx.arc(BREECH.cx, BREECH.cy, BREECH.r - 6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#c9a800';
-      ctx.fillRect(BREECH.cx - 3, BREECH.cy - 3, 6, 6);
-    }
-    if (!g.breechOpen) {
-      // breech block slid across
-      ctx.fillStyle = '#6a6a6a';
-      ctx.fillRect(BREECH.cx - 34, BREECH.cy - 34, 68, 68);
-      ctx.fillStyle = C.yellow;
-      for (let i = 0; i < 68; i += 8) ctx.fillRect(BREECH.cx - 34 + i, BREECH.cy - 34, 4, 4);
-    }
-    const breechText = g.breechOpen ? (g.shellInBreech ? 'LOADED - SPACE TO CLOSE' : 'OPEN - DROP A SHELL IN') : g.shellInBreech ? 'CLOSED - READY' : 'CLOSED EMPTY - SPACE OPENS';
-    drawText(ctx, breechText, BREECH.cx, 190, g.ready ? C.lime : C.yellow, 1, 'center');
-    if (s.tank.isBroken('gun')) drawText(ctx, 'GUN BROKEN', BREECH.cx, 200, C.red, 1, 'center');
-
-    // Dragged shell follows the cursor
-    const [mx, my] = s.mouse;
-    if (ld.dragging) this.drawShell(mx - SHELL.w / 2, my - SHELL.h / 2);
-    ctx.fillStyle = C.lime;
-    ctx.fillRect(mx - 3, my, 7, 1);
-    ctx.fillRect(mx, my - 3, 1, 7);
-  }
-
-  private drawShell(x: number, y: number) {
-    const ctx = this.ctx;
-    ctx.fillStyle = C.yellow;
-    ctx.fillRect(x, y, SHELL.w, SHELL.h);
-    ctx.fillStyle = '#c9a800';
-    ctx.fillRect(x, y + SHELL.h - 3, SHELL.w, 3);
-    ctx.fillStyle = C.red;
-    ctx.fillRect(x + SHELL.w, y + 2, 18, SHELL.h - 4);
-  }
-
-  // --- Lookout: head out of the hatch ---
-  private drawLookout(s: HudState) {
-    const ctx = this.ctx;
-    if (s.zoomLabel === '6X') {
-      // binocular mask: two overlapping circles
-      ctx.fillStyle = C.black;
-      ctx.beginPath();
-      ctx.rect(0, 0, W, H);
-      ctx.arc(W / 2 - 60, H / 2, 100, 0, Math.PI * 2, true);
-      ctx.fill();
-      ctx.save();
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.beginPath();
-      ctx.arc(W / 2 + 60, H / 2, 100, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-      if (s.tank.isBroken('optics')) this.drawStatic(W / 2 - 160, H / 2 - 100, 320, 200, s.time);
-    } else {
-      // hatch rim along the bottom
-      ctx.fillStyle = C.black;
-      ctx.beginPath();
-      ctx.ellipse(W / 2, H + 120, 300, 150, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = C.yellow;
-      ctx.beginPath();
-      ctx.ellipse(W / 2, H + 120, 300, 150, 0, Math.PI, Math.PI * 2);
-      ctx.ellipse(W / 2, H + 120, 296, 146, 0, Math.PI * 2, Math.PI, true);
-      ctx.fill();
-    }
-    // Compass strip
-    ctx.fillStyle = C.black;
-    ctx.fillRect(140, 4, 200, 12);
-    const names: Record<number, string> = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' };
-    for (let hdg = 0; hdg < 360; hdg += 5) {
-      const diff = ((hdg - s.viewHeading + 540) % 360) - 180;
-      if (Math.abs(diff) > 96) continue;
-      const x = Math.round(240 + diff);
-      if (names[hdg] !== undefined) drawText(ctx, names[hdg], x, 7, C.yellow, 1, 'center');
-      else if (hdg % 15 === 0) {
-        ctx.fillStyle = C.lime;
-        ctx.fillRect(x, 9, 1, 3);
-      }
-    }
-    ctx.fillStyle = C.red;
-    ctx.fillRect(239, 16, 3, 3);
-    ctx.fillStyle = C.black;
-    ctx.fillRect(408, 4, 68, 12);
-    ctx.fillRect(6, 234, 134, 11);
-    drawText(ctx, 'RMB BINOCULARS', 472, 7, C.yellow, 1, 'right');
-    drawText(ctx, 'HEAD OUT: SHELLS KILL YOU', 10, 237, C.red);
-  }
-
-  // --- Crawling between seats: stuttering neon tunnel ---
-  /** Crawling between seats: nearly black, a few faint pipes sliding past, quiet text. */
-  private drawCrawl(s: HudState) {
-    const ctx = this.ctx;
-    ctx.fillStyle = '#07000a';
-    ctx.fillRect(0, 0, W, H);
-    // Dim pipes drifting by, so it still reads as moving through the tank.
-    const drift = s.seats.progress * 60;
-    ctx.fillStyle = '#1a0624';
-    for (let i = 0; i < 5; i++) {
-      const y = ((i * 61 + drift * (1 + (i % 2))) % (H + 20)) - 10;
-      ctx.fillRect(0, Math.round(y), W, 3 + (i % 2) * 2);
-    }
-    drawText(ctx, '> ' + SEAT_LABEL[s.seats.target], 240, 126, '#7a5a8a', 1, 'center');
-    ctx.fillStyle = '#1a0624';
-    ctx.fillRect(200, 136, 80, 2);
-    ctx.fillStyle = '#5a3a6a';
-    ctx.fillRect(200, 136, Math.round(80 * s.seats.progress), 2);
-  }
-
-  private drawSeatBar(s: HudState) {
-    const ctx = this.ctx;
-    const seats: Seat[] = ['driver', 'gunner', 'loader', 'lookout'];
-    ctx.fillStyle = C.black;
-    ctx.fillRect(0, H - 13, W, 13);
-    seats.forEach((seat, i) => {
-      const x = 4 + i * 62;
-      const isCur = s.seats.current === seat;
-      const isTarget = s.seats.switching && s.seats.target === seat;
-      const blink = Math.floor(s.time * 6) % 2 === 0;
-      ctx.fillStyle = isCur ? C.lime : isTarget && blink ? C.yellow : C.purple;
-      ctx.fillRect(x, H - 11, 58, 9);
-      drawText(ctx, `${i + 1} ${SEAT_LABEL[seat]}`, x + 29, H - 9, isCur || (isTarget && blink) ? C.black : C.pink, 1, 'center');
-    });
-    // Lever state is always known: you set it.
-    const steerArrows = s.tank.steer === 0 ? '--' : (s.tank.steer < 0 ? '<' : '>').repeat(Math.round(Math.abs(s.tank.steer) * 4));
-    drawText(ctx, `THR ${THROTTLE_LABEL[s.tank.throttleIdx]}  STR ${steerArrows}`, W - 4, H - 9, C.cyan, 1, 'right');
-  }
-
   /** Dead: a cursed screen. Stuttering red noise, a skull made of text, the killer's name. */
   private drawDead(s: HudState) {
     const ctx = this.ctx;
@@ -449,12 +221,12 @@ export class Hud {
     const f = Math.floor(s.time * 8);
     // Translucent, so the death camera shows through.
     ctx.fillStyle = f % 2 ? 'rgba(58,0,8,0.55)' : 'rgba(20,0,26,0.45)';
-    ctx.fillRect(0, 0, W, H - 13);
+    ctx.fillRect(0, 0, W, H);
     let seed = f * 9973;
     const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
     for (let i = 0; i < 400; i++) {
       ctx.fillStyle = rnd() < 0.5 ? C.red : C.pinkDark;
-      ctx.fillRect(Math.floor(rnd() * W), Math.floor(rnd() * (H - 13)), 3, 1);
+      ctx.fillRect(Math.floor(rnd() * W), Math.floor(rnd() * H), 3, 1);
     }
     const jx = (f % 3) - 1, jy = ((f * 7) % 3) - 1;
     const skull = ['  ######  ', ' ######## ', '## #### ##', '##########', ' ### ## ###', '  ######  ', '  # # # # '];
@@ -494,15 +266,13 @@ export class Hud {
   private drawClickToPlay() {
     const ctx = this.ctx;
     ctx.fillStyle = 'rgba(20,0,26,0.85)';
-    ctx.fillRect(40, 40, 400, 130);
+    ctx.fillRect(40, 40, 400, 110);
     drawText(ctx, 'SKELETON CREW', 240, 52, C.pink, 3, 'center');
     drawText(ctx, 'CLICK TO CLIMB IN', 240, 80, C.lime, 2, 'center');
     const help = [
-      '1-4 CHANGE SEAT (2 SECONDS, ANY SEAT)',
-      'DRIVER: W/S THROTTLE  A/D STEER  X CENTRE  SPACE BRAKE',
-      'GUNNER: MOUSE AIM  LMB CANNON  MMB MACHINE GUN  RMB ZOOM',
-      'LOADER: DRAG A SHELL INTO THE BREECH  SPACE OPENS/CLOSES',
-      'LOOKOUT: MOUSE LOOK  RMB BINOCULARS',
+      'MOUSE LOOK - THE TURRET FOLLOWS YOUR GAZE',
+      'LMB CANNON (RELOADS ITSELF)  MMB MACHINE GUN  RMB GUN SIGHT',
+      'W/S THROTTLE  A/D STEER  X CENTRE  SPACE BRAKE  TAB SCORES',
     ];
     help.forEach((line, i) => drawText(ctx, line, 240, 104 + i * 10, C.yellow, 1, 'center'));
   }

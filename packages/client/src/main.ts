@@ -1,22 +1,20 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import {
-  HATCH_KILL_RADIUS, MG_RATE, MG_SPEED, MG_SPREAD, PART_LABEL, PHYSICS_HZ, RENDER_HEIGHT, RENDER_WIDTH, RESPAWN_DELAY, SEAT_CODES,
-  SEAT_CRAWLING, SHELL_SPEED, SPAWN_PROTECTION, STATE_HZ, ZONE_LABEL, generateMap, hullZone,
+  GUN_MAX_ELEVATION, GUN_MIN_ELEVATION, MG_RATE, MG_SPEED, MG_SPREAD, PART_LABEL, PHYSICS_HZ, RENDER_HEIGHT,
+  RENDER_WIDTH, RESPAWN_DELAY, SHELL_SPEED, SPAWN_PROTECTION, STATE_HZ, ZONE_LABEL, generateMap, hullZone,
   type HitZone, type Part, type Phase, type Score, type ServerMsg,
 } from '@skeleton-crew/shared';
 import { Pipeline } from './render/pipeline';
 import { World } from './world';
 import { buildTankModel, TRACK_TEXTURE_LENGTH } from './models/tank';
 import { TankSim } from './sim/tank';
-import { Seats, SEATS } from './seats/seats';
 import { Input } from './input';
 import { Hud, HUD_COLORS } from './ui/hud';
 import { Gun } from './sim/gun';
 import { Shells, type HitOutcome, type Shell, type ShellHit } from './sim/shells';
 import { Bullets } from './sim/bullets';
 import type { ColliderRole } from './sim/tank';
-import { LoaderStation } from './ui/loader';
 import { Fx } from './fx';
 import { Audio, type Voice } from './audio';
 import { Targets } from './targets';
@@ -29,15 +27,11 @@ const params = new URLSearchParams(location.search);
 // ?test hides the click-to-play panel (headless browsers cannot lock the pointer).
 const TEST_MODE = params.has('test');
 const STEP = 1 / PHYSICS_HZ;
-const DEG = Math.PI / 180;
 
-// View settings per seat (vertical fov in degrees).
-const DRIVER_FOV = 50;
-const DRIVER_LOOK = 20 * DEG;
-const DRIVER_SLIT_SHIFT = 51; // px: screen centre (135) minus slit centre (84)
-const GUNNER_FOV = { '2X': 18, '4X': 9 } as const;
+// Views (vertical fov in degrees): head out of the hatch, and down the gun sight (right mouse).
 const LOOKOUT_FOV = 60;
-const BINOCULAR_FOV = 10;
+const SIGHT_FOV = 15;
+const AIM_RANGE = 500; // m: how far the gaze ray looks for something to aim the gun at
 const MOUSE_SENS = 0.0025; // rad per pixel at 60 deg fov
 const RECOIL_IMPULSE = 9000; // N*s
 const MESSAGE_TIME = 2.5; // s
@@ -96,10 +90,8 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
   const model = buildTankModel();
   world.scene.add(model.root);
 
-  const seats = new Seats();
   const hud = new Hud(hudCanvas);
   const gun = new Gun();
-  const loader = new LoaderStation();
   const fx = new Fx(world.scene);
   const audio = new Audio();
   const engine = audio.loop('engine');
@@ -158,7 +150,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
   let mgCooldown = 0;
   function fireMg() {
     const pos = new THREE.Vector3(), dir = new THREE.Vector3();
-    tank.coax(pos, dir);
+    tank.coax(pos, dir, aimPoint);
     // a little spread: a cone around the barrel
     dir.x += (Math.random() - 0.5) * 2 * MG_SPREAD;
     dir.y += (Math.random() - 0.5) * 2 * MG_SPREAD;
@@ -181,20 +173,9 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
     return hullZone(local.x, local.y, local.z);
   }
 
-  /**
-   * Our shell exploded at `point`: report hits to the server. Any lookout with their head out within
-   * HATCH_KILL_RADIUS dies outright, whether or not the shell touched their tank.
-   */
+  /** Our shell hit another tank: report it; the server owns the damage. */
   function reportHits(shell: Shell, point: THREE.Vector3, direct: { id: number; zone: HitZone } | null) {
-    if (!net || !remotes || shell.visual) return;
-    const hatch = new THREE.Vector3();
-    for (const r of remotes.byId.values()) {
-      if (r.dead || SEAT_CODES[r.seat] !== 'lookout') continue;
-      if (remotes.hatchPos(r, hatch).distanceTo(point) > HATCH_KILL_RADIUS) continue;
-      net.sendHit(shell.id, r.id, 'hatch', arr(point));
-      if (direct?.id === r.id) direct = null;
-    }
-    if (direct) net.sendHit(shell.id, direct.id, direct.zone, arr(point));
+    if (net && direct && !shell.visual) net.sendHit(shell.id, direct.id, direct.zone, arr(point));
   }
 
   /** Decide what a shell hit does. Fences and trees break and let it through; everything else stops it. */
@@ -207,10 +188,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
     fx.explosion(hit.point, found || remote ? 1.2 : 1);
     audio.play('explosion', { pos: hit.point });
     if (remote) audio.play('impact', { pos: hit.point });
-    // Any shell hit on a tank with its lookout out is a shrapnel kill (the server checks this too).
-    const direct = remote && !remote.remote.dead
-      ? { id: remote.remote.id, zone: SEAT_CODES[remote.remote.seat] === 'lookout' ? ('hatch' as const) : classifyZone(remote.role, remote.remote.sim.body, hit.normal) }
-      : null;
+    const direct = remote && !remote.remote.dead ? { id: remote.remote.id, zone: classifyZone(remote.role, remote.remote.sim.body, hit.normal) } : null;
     reportHits(shell, hit.point, direct);
     if (found && targets) {
       audio.play('impact', { pos: hit.point });
@@ -242,7 +220,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
     }
     if (!gun.fire()) {
       audio.play('dry');
-      say(gun.shellInBreech ? 'BREECH OPEN - LOADER MUST CLOSE IT' : 'NOT LOADED', HUD_COLORS.red);
+      say('RELOADING', HUD_COLORS.yellow);
       return;
     }
     const pos = new THREE.Vector3(), dir = new THREE.Vector3();
@@ -263,18 +241,16 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
     Math.floor(((cx - box.left) / box.width) * RENDER_WIDTH),
     Math.floor(((cy - box.top) / box.height) * RENDER_HEIGHT),
   ]);
-  const camera = new THREE.PerspectiveCamera(DRIVER_FOV, RENDER_WIDTH / RENDER_HEIGHT, 0.1, 1200);
+  const camera = new THREE.PerspectiveCamera(LOOKOUT_FOV, RENDER_WIDTH / RENDER_HEIGHT, 0.1, 1200);
 
-  // Per-seat view state.
-  const look = {
-    driver: { yaw: 0, pitch: 0 },
-    lookout: { yaw: 0, pitch: -0.1 },
-  };
-  let gunnerZoom: keyof typeof GUNNER_FOV = '2X';
+  // Where you look, relative to the hull (yaw: + is left). The turret follows it.
+  const look = { yaw: 0, pitch: -0.05 };
+  let sighting = false; // right mouse held: down the gun sight
+  let sightOverride: boolean | null = null; // tests: headless browsers can't hold the right button
 
   addEventListener('mousedown', () => {
     audio.unlock();
-    if (controlling() && seats.current !== 'loader') input.lock();
+    if (controlling()) input.lock();
   });
 
   // --- Network ---
@@ -311,8 +287,8 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
         tank.teleport(sp, map.heightAt(sp.x, sp.z));
         tank.damage.reset();
         gun.reset();
-        seats.current = seats.target = 'driver';
-        seats.remaining = 0;
+        look.yaw = 0;
+        look.pitch = -0.05;
         say('GO GO GO', HUD_COLORS.lime);
       } else if (msg.t === 'left') {
         remotes.remove(msg.id);
@@ -390,7 +366,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
     const p = tank.body.translation(), q = tank.body.rotation(), v = tank.body.linvel();
     net.sendState({
       id: 0,
-      seat: seats.current ? SEAT_CODES.indexOf(seats.current) : SEAT_CRAWLING,
+      flags: 0,
       pos: [p.x, p.y, p.z],
       quat: [q.x, q.y, q.z, q.w],
       vel: [v.x, v.y, v.z],
@@ -405,27 +381,16 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
 
   function handleInput(dt: number) {
     if (!controlling()) {
-      // Lobby/countdown: tank parked, input ignored.
+      // Lobby/countdown/dead: tank parked, input ignored.
       input.takePresses();
       input.takeClicks();
       input.takeMouse();
       tank.brake = true;
+      sighting = false;
       return;
     }
     for (const code of input.takePresses()) {
       audio.unlock();
-      const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(code);
-      if (n >= 0 && seats.current !== SEATS[n] && !(seats.switching && seats.target === SEATS[n])) {
-        seats.request(SEATS[n]);
-        loader.cancel();
-        crew('grunt');
-        // Grab the mouse now, while the key press still counts as a user gesture.
-        if (SEATS[n] !== 'loader') input.lock();
-        audio.play('crawl');
-      }
-      if (seats.current === 'loader' && code === 'Space') {
-        if (gun.breechOpen ? gun.close() : ((gun.breechOpen = true), true)) audio.play('breech');
-      }
       // Dev key: break a random part on your own tank to see its effect.
       if (code === 'F8') {
         const parts: Part[] = ['tracks', 'engine', 'turretRing', 'gun', 'optics'];
@@ -435,110 +400,118 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
         say(`DEV: ${PART_LABEL[part]} BROKEN`, HUD_COLORS.red);
         crew('panic', true);
       }
-      if (seats.current === 'driver') {
-        if (code === 'KeyW') tank.throttleUp();
-        if (code === 'KeyS') tank.throttleDown();
-        if (code === 'KeyA') tank.steerBy(-1);
-        if (code === 'KeyD') tank.steerBy(1);
-        if (code === 'KeyX') tank.centreSteer();
-      }
+      // Driving levers: they stay where you leave them.
+      if (code === 'KeyW') tank.throttleUp();
+      if (code === 'KeyS') tank.throttleDown();
+      if (code === 'KeyA') tank.steerBy(-1);
+      if (code === 'KeyD') tank.steerBy(1);
+      if (code === 'KeyX') tank.centreSteer();
     }
-    // Brake only while held in the driver seat; levers stay put when you leave.
-    tank.brake = seats.current === 'driver' && input.isHeld('Space');
+    tank.brake = input.isHeld('Space');
 
     const clicks = input.takeClicks();
     if (clicks.length) audio.unlock();
     const [dx, dy] = input.takeMouse();
     // A click that captures the mouse is not also a game action (no firing on the grab click).
-    const rmb = clicks.some((c) => c.button === 2 && c.locked);
     const lmb = clicks.some((c) => c.button === 0 && c.locked);
-    switch (seats.current) {
-      case 'driver':
-        look.driver.yaw = clamp(look.driver.yaw - dx * MOUSE_SENS, DRIVER_LOOK);
-        look.driver.pitch = clamp(look.driver.pitch - dy * MOUSE_SENS, DRIVER_LOOK / 2);
-        break;
-      case 'gunner': {
-        const sens = MOUSE_SENS * (GUNNER_FOV[gunnerZoom] / 60) * (input.isHeld('ShiftLeft') ? 0.3 : 1);
-        tank.aimBy(-dx * sens, -dy * sens);
-        if (rmb) gunnerZoom = gunnerZoom === '2X' ? '4X' : '2X';
-        if (lmb) fire();
-        // Hold the middle button for the machine gun. Unlimited ammo, no recoil.
-        if (input.mouseButtons.has(1) && input.locked) {
-          mgCooldown -= dt;
-          while (mgCooldown <= 0) {
-            fireMg();
-            mgCooldown += 1 / MG_RATE;
-          }
-        } else mgCooldown = 0;
-        break;
-      }
-      case 'loader': {
-        const ev = loader.update(input.mouseX, input.mouseY, input.mouseButtons.has(0), gun);
-        if (ev === 'grab') audio.play('clank', { rate: 1.4, volume: 0.5 });
-        if (ev === 'loaded') {
-          audio.play('clank', { rate: 0.7 });
-          crew('yep');
-        }
-        if (ev === 'rejected') say(gun.shellInBreech ? 'ALREADY LOADED' : 'BREECH IS CLOSED', HUD_COLORS.red);
-        break;
-      }
-      case 'lookout': {
-        const fov = input.mouseButtons.has(2) ? BINOCULAR_FOV : LOOKOUT_FOV;
-        look.lookout.yaw -= dx * MOUSE_SENS * (fov / 60);
-        look.lookout.pitch = clamp(look.lookout.pitch - dy * MOUSE_SENS * (fov / 60), 1.2);
-        break;
-      }
+    sighting = sightOverride ?? (input.locked && input.mouseButtons.has(2));
+    if (sighting) {
+      // Down the sight the mouse moves the gun directly; keep the gaze in step so letting go doesn't jump.
+      const sens = MOUSE_SENS * (SIGHT_FOV / 60) * (input.isHeld('ShiftLeft') ? 0.3 : 1);
+      // Only when the mouse moves: a swing already under way (from the gaze) carries on.
+      if (dx || dy) tank.aimBy(-dx * sens, -dy * sens);
+      look.yaw = tank.turretYawCmd;
+      look.pitch = clamp(tank.gunPitchCmd, 1.2);
+    } else {
+      look.yaw -= dx * MOUSE_SENS;
+      look.pitch = clamp(look.pitch - dy * MOUSE_SENS, 1.2);
     }
-    // The loader needs a free cursor.
-    if (seats.current === 'loader') input.unlock();
+    if (lmb) fire();
+    // Hold the middle button for the machine gun. Unlimited ammo, no recoil.
+    if (input.mouseButtons.has(1) && input.locked) {
+      mgCooldown -= dt;
+      while (mgCooldown <= 0) {
+        fireMg();
+        mgCooldown += 1 / MG_RATE;
+      }
+    } else mgCooldown = 0;
   }
 
-  function placeCamera(): { fov: number; zoom: string; viewHeading: number } {
+  /** Point the gun at a world position, compensating for hull tilt and shell drop. */
+  function aimAtPoint(x: number, y: number, z: number) {
+    tank.pose(hullPos, hullQuat);
+    const local = new THREE.Vector3(x, y, z).sub(hullPos).applyQuaternion(hullQuat.clone().invert());
+    const { yaw, pitch, range } = tank.aimAnglesTo(local);
+    tank.turretYawCmd = yaw;
+    const drop = (9.81 * range) / (2 * SHELL_SPEED * SHELL_SPEED);
+    tank.gunPitchCmd = Math.max(GUN_MIN_ELEVATION, Math.min(GUN_MAX_ELEVATION, pitch + drop));
+    return range;
+  }
+
+  /** Head-out view: the turret swings toward whatever you are looking at. */
+  const gazeTarget = new THREE.Vector3();
+  let aimRange = 75; // m to what you're aiming at
+  const aimPoint = new THREE.Vector3(); // what the crosshair (sight) or your gaze (head out) is on
+
+  /** Down the sight: how far away is whatever the crosshair is on? */
+  function sightRange() {
+    const origin = camera.getWorldPosition(new THREE.Vector3());
+    const dir = camera.getWorldDirection(new THREE.Vector3());
+    const r = rangeAlong(origin, dir);
+    aimPoint.copy(origin).addScaledVector(dir, r);
+    return r;
+  }
+
+  /** Distance along a ray to the first solid thing, or another tank's commander (he has no collider). */
+  function rangeAlong(origin: THREE.Vector3, dir: THREE.Vector3) {
+    const hit = physics.castRay(new RAPIER.Ray(origin, dir), AIM_RANGE, true, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, undefined, undefined, tank.body);
+    const man = remotes?.hitMan(origin, dir, AIM_RANGE);
+    return Math.min(hit ? hit.timeOfImpact : AIM_RANGE, man ? man.t : AIM_RANGE);
+  }
+  function followGaze() {
+    const origin = camera.getWorldPosition(new THREE.Vector3());
+    const dir = camera.getWorldDirection(new THREE.Vector3());
+    gazeTarget.copy(origin).addScaledVector(dir, Math.max(rangeAlong(origin, dir), 15));
+    aimRange = aimAtPoint(gazeTarget.x, gazeTarget.y, gazeTarget.z);
+    aimPoint.copy(gazeTarget);
+  }
+
+  /** Where the gun actually points, on screen (HUD pixels), at the distance you're looking. */
+  function gunMark(): [number, number] | null {
+    const pos = new THREE.Vector3(), dir = new THREE.Vector3();
+    tank.muzzle(pos, dir);
+    const p = pos.addScaledVector(dir, Math.max(15, gazeTarget.distanceTo(pos))).project(camera);
+    if (p.z > 1) return null;
+    return [((p.x + 1) / 2) * RENDER_WIDTH, ((1 - p.y) / 2) * RENDER_HEIGHT];
+  }
+
+  function placeCamera(): { fov: number; viewHeading: number } {
+    let fov = LOOKOUT_FOV;
     if (dead) {
       // Death camera: circle the burning wreck in jerky 12 fps steps.
       model.root.visible = true;
-      camera.clearViewOffset();
       const a = (Math.floor(time * 12) / 12) * 0.5;
       camera.position.set(hullPos.x + Math.sin(a) * 14, hullPos.y + 6, hullPos.z + Math.cos(a) * 14);
       camera.lookAt(hullPos);
-      if (camera.fov !== LOOKOUT_FOV) {
-        camera.fov = LOOKOUT_FOV;
-        camera.updateProjectionMatrix();
-      }
-      return { fov: LOOKOUT_FOV, zoom: '', viewHeading: 0 };
-    }
-    model.root.visible = seats.current === 'lookout';
-    // The driver's slit sits above screen centre: shift the view window so the horizon lands in it.
-    if (seats.current === 'driver') camera.setViewOffset(RENDER_WIDTH, RENDER_HEIGHT, 0, DRIVER_SLIT_SHIFT, RENDER_WIDTH, RENDER_HEIGHT);
-    else camera.clearViewOffset();
-    let fov = DRIVER_FOV, zoom = '';
-    switch (seats.current) {
-      case 'driver':
-        camera.position.copy(tmpV.set(-0.75, 0.25, -3.3).applyQuaternion(hullQuat).add(hullPos));
-        camera.quaternion.copy(hullQuat).multiply(tmpQ.setFromEuler(tmpE.set(look.driver.pitch, look.driver.yaw, 0)));
-        break;
-      case 'gunner':
-        // The sight sits right above the cannon, so the crosshair lines up with both guns.
-        camera.position.copy(model.gun.localToWorld(tmpV.set(0, 0.3, -0.4)));
-        model.gun.getWorldQuaternion(camera.quaternion);
-        fov = GUNNER_FOV[gunnerZoom];
-        zoom = gunnerZoom;
-        break;
-      case 'lookout': {
-        camera.position.copy(model.turret.localToWorld(tmpV.set(0.5, 1.35, 0.4)));
-        camera.quaternion.copy(hullQuat).multiply(tmpQ.setFromEuler(tmpE.set(look.lookout.pitch, look.lookout.yaw, 0)));
-        const zoomed = input.mouseButtons.has(2);
-        fov = zoomed ? BINOCULAR_FOV : LOOKOUT_FOV;
-        zoom = zoomed ? '6X' : '1X';
-        break;
-      }
+    } else if (sighting) {
+      // Down the gun sight, right above the cannon.
+      model.root.visible = false;
+      camera.position.copy(model.gun.localToWorld(tmpV.set(0, 0.3, -0.4)));
+      model.gun.getWorldQuaternion(camera.quaternion);
+      fov = SIGHT_FOV;
+    } else {
+      // Head out of the hatch.
+      model.root.visible = true;
+      camera.position.copy(model.turret.localToWorld(tmpV.set(0.5, 1.35, 0.4)));
+      camera.quaternion.copy(hullQuat).multiply(tmpQ.setFromEuler(tmpE.set(look.pitch, look.yaw, 0)));
     }
     if (camera.fov !== fov) {
       camera.fov = fov;
       camera.updateProjectionMatrix();
     }
+    camera.updateMatrixWorld();
     const dir = camera.getWorldDirection(tmpV);
-    return { fov, zoom, viewHeading: compass(dir.x, dir.z) };
+    return { fov, viewHeading: compass(dir.x, dir.z) };
   }
 
   function frame() {
@@ -548,7 +521,6 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
     time += dt;
 
     handleInput(dt);
-    seats.update(dt);
     remotes?.update(time, dt);
     acc += dt;
     while (acc >= STEP) {
@@ -560,7 +532,7 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
       bullets.step(STEP);
       acc -= STEP;
     }
-    if (gun.update(dt) && seats.current === 'loader') audio.play('clank', { rate: 1.2, volume: 0.4 });
+    if (gun.update(dt)) audio.play('breech', { volume: 0.5 }); // reloaded
     world.update(dt);
     targets?.update(dt);
     sendState(dt);
@@ -580,26 +552,23 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
     model.root.updateMatrixWorld(true);
 
     const view = placeCamera();
-    audio.setInside(seats.current !== 'lookout');
+    if (controlling() && !sighting) followGaze();
+    else if (sighting) aimRange = sightRange();
+    audio.setInside(sighting);
     audio.setListener(camera);
     engine.setRate(0.6 + Math.abs(tank.speed) / 12);
     engine.setVolume(0.35);
-    const seesOutside = !!dead || seats.current === 'driver' || seats.current === 'gunner' || seats.current === 'lookout';
-    if (seesOutside) pipeline.render(world.scene, camera);
-    else pipeline.clear(0x000000);
+    pipeline.render(world.scene, camera);
 
-    const fwd = tmpV.set(0, 0, -1).applyQuaternion(hullQuat);
     hud.draw({
-      seats, tank, time,
+      tank, time,
       locked: input.locked || TEST_MODE || !playing(),
       everLocked: input.everLocked,
+      sighting,
       fovDeg: view.fov,
-      zoomLabel: view.zoom,
-      heading: compass(fwd.x, fwd.z),
       viewHeading: view.viewHeading,
-      mouse: [input.mouseX, input.mouseY],
+      gunMark: !dead && !sighting ? gunMark() : null,
       gun,
-      loader,
       message,
       scores: net && input.isHeld('Tab') ? scores : null,
       myId: net?.id ?? 0,
@@ -614,20 +583,21 @@ function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | n
 
   // Handle for debugging and automated checks.
   (window as unknown as { __game: unknown }).__game = {
-    THREE, tank, seats, map, physics, look, world, gun, targets, remotes, shells, bullets, fire, fireMg, net,
+    THREE, tank, map, physics, look, world, gun, targets, remotes, shells, bullets, fire, fireMg, net,
+    /** Hold the gun sight in tests (headless has no right mouse). */
+    setSighting(on: boolean | null) { sightOverride = on; },
     get phase() { return phase; },
     get dead() { return dead; },
     get scores() { return scores; },
-    /** Point the gun at a world position, compensating for hull tilt and shell drop (for tests). */
+    /** Point the gun at a world position (tests). The gaze is moved there too, or it would pull the turret back. */
     aimAt(x: number, y: number, z: number) {
-      tank.pose(hullPos, hullQuat);
-      const local = new THREE.Vector3(x, y, z).sub(hullPos).applyQuaternion(hullQuat.clone().invert()).sub(new THREE.Vector3(0, 1.1, 0.4));
-      const range = Math.hypot(local.x, local.z);
-      tank.turretYawCmd = Math.atan2(-local.x, -local.z);
-      tank.gunPitchCmd = Math.atan2(local.y, range) + (9.81 * range) / (2 * SHELL_SPEED * SHELL_SPEED);
-      return range;
+      const r = aimAtPoint(x, y, z);
+      look.yaw = tank.turretYawCmd;
+      look.pitch = tank.gunPitchCmd;
+      return r;
     },
     get lastHit() { return lastHit; },
+    get aimRange() { return aimRange; },
     get shotsFired() { return shotsFired; },
     get message() { return message; },
   };

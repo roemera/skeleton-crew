@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { INTERP_DELAY, SEAT_CODES, type TankState } from '@skeleton-crew/shared';
+import { INTERP_DELAY, type TankState } from '@skeleton-crew/shared';
 import { TankSim } from './sim/tank';
 import { buildTankModel, MAN_CENTER, MAN_HALF, TRACK_TEXTURE_LENGTH, type TankModel } from './models/tank';
 import type { Audio, Loop } from './audio';
@@ -14,7 +14,6 @@ interface Snap {
   vel: THREE.Vector3;
   turretYaw: number;
   gunPitch: number;
-  seat: number;
 }
 
 const MAX_EXTRAPOLATE = 0.25; // s: keep moving a tank whose updates stopped, but not for long
@@ -25,7 +24,6 @@ export interface Remote {
   model: TankModel;
   engine: Loop;
   snaps: Snap[];
-  seat: number;
   dead: boolean;
 }
 
@@ -46,7 +44,6 @@ export class Remotes {
       vel: new THREE.Vector3(...s.vel),
       turretYaw: s.turretYaw,
       gunPitch: s.gunPitch,
-      seat: s.seat,
     });
     if (r.snaps.length > 30) r.snaps.shift();
   }
@@ -56,7 +53,7 @@ export class Remotes {
     const model = buildTankModel();
     this.scene.add(model.root);
     const engine = this.audio.loop('engine', new THREE.Vector3(...s.pos));
-    const r: Remote = { id: s.id, sim, model, engine, snaps: [], seat: s.seat, dead: false };
+    const r: Remote = { id: s.id, sim, model, engine, snaps: [], dead: false };
     this.byId.set(s.id, r);
     return r;
   }
@@ -101,7 +98,7 @@ export class Remotes {
     });
   }
 
-  /** World position of a remote tank's hatch (the lookout's chest). */
+  /** World position of a remote tank's hatch (the commander's chest). */
   hatchPos(r: Remote, out = new THREE.Vector3()) {
     return r.model.man.localToWorld(out.copy(MAN_CENTER));
   }
@@ -142,14 +139,13 @@ export class Remotes {
       const s = r.snaps;
       if (s.length === 0) continue;
       while (s.length > 2 && s[1].t <= t) s.shift(); // keep the pair around t
-      let yaw: number, pitch: number, seat: number, speed: number;
+      let yaw: number, pitch: number, speed: number;
       if (s.length >= 2 && t >= s[0].t && t <= s[1].t) {
         const k = (t - s[0].t) / Math.max(1e-6, s[1].t - s[0].t);
         pos.lerpVectors(s[0].pos, s[1].pos, k);
         quat.slerpQuaternions(s[0].quat, s[1].quat, k);
         yaw = lerpAngle(s[0].turretYaw, s[1].turretYaw, k);
         pitch = s[0].gunPitch + (s[1].gunPitch - s[0].gunPitch) * k;
-        seat = s[1].seat;
         speed = s[1].vel.length();
       } else {
         // Before the first update or past the newest: hold, or coast a little on its velocity.
@@ -159,7 +155,6 @@ export class Remotes {
         quat.copy(last.quat);
         yaw = last.turretYaw;
         pitch = last.gunPitch;
-        seat = last.seat;
         speed = last.vel.length();
       }
       r.sim.body.setNextKinematicTranslation(pos);
@@ -169,8 +164,8 @@ export class Remotes {
       r.model.root.quaternion.copy(quat);
       r.model.turret.rotation.y = yaw;
       r.model.gun.rotation.x = pitch;
-      r.seat = seat;
-      r.model.man.visible = SEAT_CODES[seat] === 'lookout' && !r.dead;
+      // The commander is always out of the hatch.
+      r.model.man.visible = !r.dead;
       // Cursed but cheap: both tracks scroll at hull speed.
       const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
       const v = s[s.length - 1].vel.dot(fwd);

@@ -1,6 +1,5 @@
 // Starting tuning values from the design doc. Change after playtesting.
 
-export const SEAT_SWITCH_TIME = 0.6; // s, same for every seat
 
 // Driving
 export const TOP_SPEED_FORWARD = 12; // m/s
@@ -19,11 +18,6 @@ export const GUN_MAX_ELEVATION = (20 * Math.PI) / 180;
 export const TANK_MASS = 30000; // kg
 export const HULL_HALF = { x: 1.7, y: 0.6, z: 3.25 }; // m, forward is -z
 
-// Lookout
-export const HATCH_KILL_RADIUS = 3; // m
-export const SPOT_TIME_EYES = 0.5; // s
-export const SPOT_TIME_BINOCULARS = 1.5; // s
-export const SPOT_MARKER_LIFETIME = 20; // s
 
 // World
 export const MAP_SIZE = 400; // m, square, centred on the origin (tight 1v1)
@@ -46,15 +40,13 @@ export const PHYSICS_HZ = 60;
 export const SHELL_SPEED = 600; // m/s muzzle velocity
 export const GRAVITY = 9.81;
 export const SHELL_LIFETIME = 4; // s before a shell that hit nothing is removed
-export const RACK_SIZE = 6;
-export const STORAGE_SIZE = 30;
-export const RACK_REFILL_TIME = 4; // s per shell from storage to rack
+export const RELOAD_TIME = 3; // s: the gun reloads itself after every shot (unlimited shells)
 export const BARREL_LENGTH = 4.6; // m
 
 // Coaxial machine gun (gunner, middle mouse). Only hurts a lookout sticking out of a hatch.
 export const MG_SPEED = 400; // m/s: slow enough for visible drop
 export const MG_RATE = 10; // rounds per second
-export const MG_SPREAD = (0.4 * Math.PI) / 180; // rad
+export const MG_SPREAD = (0.2 * Math.PI) / 180; // rad
 export const MG_LIFETIME = 1.5; // s
 
 // Damage
