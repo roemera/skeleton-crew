@@ -2,9 +2,13 @@
   "name": "skeleton-crew",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
+    "predev": "node scripts/ensure-native.mjs",
     "dev": "npm run dev -w @skeleton-crew/client",
+    "prebuild": "node scripts/ensure-native.mjs",
     "build": "npm run build -w @skeleton-crew/client",
     "typecheck": "tsc -p packages/client --noEmit"
   }

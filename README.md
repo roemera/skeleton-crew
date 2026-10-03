@@ -12,6 +12,10 @@ npm install
 npm run dev        # http://localhost:5173
 ```
 
+`npm run dev` and `npm run build` first run `scripts/ensure-native.mjs`, which installs Vite's native
+binaries for your platform if npm skipped them (a known npm bug that shows up on Windows as
+"Cannot find native binding").
+
 Options: `?seed=123` picks a different map; `?test` hides the click-to-play panel (for headless checks).
 
 ## Controls
