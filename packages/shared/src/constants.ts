@@ -36,3 +36,17 @@ export const RENDER_WIDTH = 480;
 export const RENDER_HEIGHT = 270;
 
 export const PHYSICS_HZ = 60;
+
+// Gun and shells
+export const SHELL_SPEED = 600; // m/s muzzle velocity
+export const GRAVITY = 9.81;
+export const SHELL_LIFETIME = 4; // s before a shell that hit nothing is removed
+export const RACK_SIZE = 6;
+export const STORAGE_SIZE = 30;
+export const RACK_REFILL_TIME = 4; // s per shell from storage to rack
+export const BARREL_LENGTH = 4.6; // m
+
+// Damage
+export const TANK_HEALTH = 100;
+export const RESPAWN_DELAY = 5; // s
+export const SPAWN_PROTECTION = 3; // s

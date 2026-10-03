@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { HULL_HALF } from '@skeleton-crew/shared';
+import { BARREL_LENGTH, HULL_HALF } from '@skeleton-crew/shared';
+import { GUN_OFFSET, TURRET_OFFSET } from '../sim/tank';
 import { tex } from '../render/textures';
 import { wobble } from '../render/pipeline';
 
@@ -10,8 +11,6 @@ export interface TankModel {
   trackMaps: [THREE.Texture, THREE.Texture]; // left, right (scrolled by track speed)
 }
 
-export const TURRET_OFFSET = new THREE.Vector3(0, HULL_HALF.y + 0.45, 0.4);
-export const GUN_OFFSET = new THREE.Vector3(0, 0.1, -1.45); // in turret frame
 
 const mat = (map: THREE.Texture) => wobble(new THREE.MeshLambertMaterial({ map, flatShading: true }));
 
@@ -49,9 +48,9 @@ export function buildTankModel(): TankModel {
   const gun = new THREE.Group();
   gun.position.copy(GUN_OFFSET);
   const mantlet = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.6, 0.5), turretMat);
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, 4.6, 6), mat(tex.hazard()));
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, BARREL_LENGTH, 6), mat(tex.hazard()));
   barrel.rotation.x = Math.PI / 2;
-  barrel.position.z = -2.3;
+  barrel.position.z = -BARREL_LENGTH / 2;
   gun.add(mantlet, barrel);
   turret.add(gun);
   root.add(turret);

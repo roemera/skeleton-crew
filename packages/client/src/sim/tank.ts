@@ -1,6 +1,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import {
+  BARREL_LENGTH, TankDamage, type Part,
   GUN_ELEVATION_RATE, GUN_MAX_ELEVATION, GUN_MIN_ELEVATION, HULL_HALF, HULL_TURN_RATE, STEER_STEP,
   TANK_MASS, THROTTLE_STEPS, TOP_SPEED_FORWARD, TOP_SPEED_REVERSE, TURRET_TURN_RATE, type Spawn,
 } from '@skeleton-crew/shared';
@@ -22,11 +23,20 @@ const BRAKE_MAX = 8; // m/s^2
 /** Tank collision groups: member of group 3, collides with everything except debris (group 2). */
 export const TANK_GROUPS = 0x0004_fffd;
 
+// Turret and gun geometry, in the hull frame (forward is -z). The model uses the same numbers.
+export const TURRET_OFFSET = new THREE.Vector3(0, HULL_HALF.y + 0.45, 0.4);
+export const GUN_OFFSET = new THREE.Vector3(0, 0.1, -1.45); // in the turret frame
+
+export type ColliderRole = 'hull' | 'turret' | 'barrel';
+
 const v3 = () => new THREE.Vector3();
 
 export class TankSim {
   readonly body: RAPIER.RigidBody;
   readonly hullCollider: RAPIER.Collider;
+  readonly turretCollider: RAPIER.Collider;
+  readonly barrelCollider: RAPIER.Collider;
+  readonly damage = new TankDamage();
 
   // Driver levers: they stay where they were left (cruise control).
   throttleIdx = THROTTLE_STEPS.indexOf(0);
@@ -73,15 +83,41 @@ export class TankSim {
         .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
       this.body,
     );
-    world.createCollider(
-      RAPIER.ColliderDesc.cuboid(1.1, 0.45, 1.4).setTranslation(0, hy + 0.45, 0.4).setDensity(0).setFriction(0.3).setCollisionGroups(TANK_GROUPS),
+    this.turretCollider = world.createCollider(
+      RAPIER.ColliderDesc.cuboid(1.1, 0.45, 1.4).setTranslation(TURRET_OFFSET.x, TURRET_OFFSET.y, TURRET_OFFSET.z).setDensity(0).setFriction(0.3).setCollisionGroups(TANK_GROUPS),
       this.body,
     );
+    // The barrel is a sensor: shells can hit it, but it never snags on walls.
+    this.barrelCollider = world.createCollider(
+      RAPIER.ColliderDesc.cuboid(0.18, 0.18, BARREL_LENGTH / 2).setDensity(0).setSensor(true).setCollisionGroups(TANK_GROUPS),
+      this.body,
+    );
+    this.syncTurretColliders();
     for (const x of [-SUSP_X, SUSP_X]) for (const z of SUSP_Z) this.points.push(new THREE.Vector3(x, -hy, z));
   }
 
   get throttle() {
     return THROTTLE_STEPS[this.throttleIdx];
+  }
+
+  /** Which part of this tank a collider is, or null if it is not ours. */
+  roleOf(collider: RAPIER.Collider): ColliderRole | null {
+    if (collider.handle === this.hullCollider.handle) return 'hull';
+    if (collider.handle === this.turretCollider.handle) return 'turret';
+    if (collider.handle === this.barrelCollider.handle) return 'barrel';
+    return null;
+  }
+
+  isBroken(part: Part) {
+    return this.damage.isBroken(part);
+  }
+
+  /** Break a part and apply its immediate effect (broken tracks also kill cruise control). */
+  onPartBroken(part: Part) {
+    if (part === 'tracks') {
+      this.throttleIdx = THROTTLE_STEPS.indexOf(0);
+      this.steer = 0;
+    }
   }
 
   // --- Driver levers ---
@@ -105,15 +141,56 @@ export class TankSim {
   }
 
   step(dt: number) {
+    this.damage.update(dt); // broken parts repair over time
     this.stepTurret(dt);
     this.stepDrive(dt);
   }
 
   private stepTurret(dt: number) {
+    const rate = TURRET_TURN_RATE * (this.isBroken('turretRing') ? 0.25 : 1);
     const dy = this.turretYawCmd - this.turretYaw;
-    this.turretYaw += Math.sign(dy) * Math.min(Math.abs(dy), TURRET_TURN_RATE * dt);
+    this.turretYaw += Math.sign(dy) * Math.min(Math.abs(dy), rate * dt);
     const dp = this.gunPitchCmd - this.gunPitch;
     this.gunPitch += Math.sign(dp) * Math.min(Math.abs(dp), GUN_ELEVATION_RATE * dt);
+    this.syncTurretColliders();
+  }
+
+  /** Turret and gun rotation in the hull frame. */
+  private gunFrame(outQuat: THREE.Quaternion) {
+    return outQuat.setFromEuler(new THREE.Euler(this.gunPitch, this.turretYaw, 0, 'YXZ'));
+  }
+
+  private syncTurretColliders() {
+    const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.turretYaw);
+    this.turretCollider.setRotationWrtParent({ x: qYaw.x, y: qYaw.y, z: qYaw.z, w: qYaw.w });
+    const q = this.gunFrame(new THREE.Quaternion());
+    const mid = this.gunPointLocal(-BARREL_LENGTH / 2, new THREE.Vector3());
+    this.barrelCollider.setTranslationWrtParent({ x: mid.x, y: mid.y, z: mid.z });
+    this.barrelCollider.setRotationWrtParent({ x: q.x, y: q.y, z: q.z, w: q.w });
+  }
+
+  /** A point along the barrel axis (z in gun frame, negative is out the muzzle), in the hull frame. */
+  private gunPointLocal(z: number, out: THREE.Vector3) {
+    const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.turretYaw);
+    const qPitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.gunPitch);
+    out.set(0, 0, z).applyQuaternion(qPitch).add(GUN_OFFSET).applyQuaternion(qYaw).add(TURRET_OFFSET);
+    return out;
+  }
+
+  /** Muzzle position and barrel direction in world space. */
+  muzzle(outPos: THREE.Vector3, outDir: THREE.Vector3) {
+    const t = this.body.translation(), r = this.body.rotation();
+    const q = new THREE.Quaternion(r.x, r.y, r.z, r.w);
+    this.gunPointLocal(-BARREL_LENGTH, outPos).applyQuaternion(q).add(new THREE.Vector3(t.x, t.y, t.z));
+    outDir.set(0, 0, -1).applyQuaternion(this.gunFrame(new THREE.Quaternion())).applyQuaternion(q);
+  }
+
+  /** Kick the hull back when the gun fires. */
+  recoil(dir: THREE.Vector3, impulse: number) {
+    const t = this.body.translation(), r = this.body.rotation();
+    const q = new THREE.Quaternion(r.x, r.y, r.z, r.w);
+    const p = TURRET_OFFSET.clone().applyQuaternion(q).add(new THREE.Vector3(t.x, t.y, t.z));
+    this.body.applyImpulseAtPoint({ x: -dir.x * impulse, y: -dir.y * impulse, z: -dir.z * impulse }, p, true);
   }
 
   private stepDrive(dt: number) {
@@ -128,10 +205,14 @@ export class TankSim {
     this.speed = lin.x * fwd.x + lin.y * fwd.y + lin.z * fwd.z;
 
     const throttle = this.throttle;
-    const vTarget = this.brake ? 0 : throttle >= 0 ? throttle * TOP_SPEED_FORWARD : throttle * TOP_SPEED_REVERSE;
+    // Broken tracks: the tank can't drive and the tracks drag like a brake.
+    const tracksOut = this.isBroken('tracks');
+    const stopped = this.brake || tracksOut;
+    const engine = this.isBroken('engine') ? 0.25 : 1;
+    const vTarget = stopped ? 0 : (throttle >= 0 ? throttle * TOP_SPEED_FORWARD : throttle * TOP_SPEED_REVERSE) * engine;
     // Turning right = clockwise from above = negative yaw rate.
-    const yawTarget = this.brake ? 0 : -this.steer * HULL_TURN_RATE;
-    const aMax = this.brake || Math.abs(vTarget) < Math.abs(this.speed) ? BRAKE_MAX : ACCEL_MAX;
+    const yawTarget = stopped ? 0 : -this.steer * HULL_TURN_RATE * engine;
+    const aMax = stopped || Math.abs(vTarget) < Math.abs(this.speed) ? BRAKE_MAX : ACCEL_MAX;
 
     const ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: -up.x, y: -up.y, z: -up.z });
     const mPer = TANK_MASS / this.points.length;

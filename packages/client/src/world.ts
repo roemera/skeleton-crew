@@ -184,6 +184,14 @@ export class World {
     });
   }
 
+  /** A shell hit a collider. If it is a breakable object, break it and return it. */
+  shellHit(handle: number, dir: THREE.Vector3): MapObject | null {
+    const b = this.breakables.get(handle);
+    if (!b || b.broken) return null;
+    this.breakObject(b, { x: dir.x * 8, y: 0, z: dir.z * 8 });
+    return b.obj;
+  }
+
   private breakObject(b: Breakable, push: RAPIER.Vector) {
     b.broken = true;
     b.mesh.visible = false;

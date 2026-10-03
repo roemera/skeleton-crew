@@ -1,6 +1,8 @@
-import { RENDER_HEIGHT as H, RENDER_WIDTH as W, THROTTLE_STEPS } from '@skeleton-crew/shared';
+import { PART_LABEL, RENDER_HEIGHT as H, RENDER_WIDTH as W, STORAGE_SIZE, THROTTLE_STEPS, TANK_HEALTH } from '@skeleton-crew/shared';
 import type { Seat, Seats } from '../seats/seats';
 import type { TankSim } from '../sim/tank';
+import type { Gun } from '../sim/gun';
+import { BREECH, LoaderStation, RACK, SHELL } from './loader';
 import { drawText } from './font';
 
 // Garish palette.
@@ -29,7 +31,12 @@ export interface HudState {
   heading: number; // degrees, hull forward, 0 = north (-z)
   viewHeading: number; // degrees, where the camera looks
   mouse: [number, number];
+  gun: Gun;
+  loader: LoaderStation;
+  message: { text: string; color: string } | null; // short-lived feedback ("HIT SIDE HULL")
 }
+
+export const HUD_COLORS = C;
 
 export class Hud {
   private ctx: CanvasRenderingContext2D;
@@ -63,6 +70,13 @@ export class Hud {
     else if (seat === 'gunner') this.drawGunner(s);
     else if (seat === 'loader') this.drawLoader(s);
     else this.drawLookout(s);
+    if (seat !== null) this.drawDamage(s);
+    if (s.message && seat !== null) {
+      const w = s.message.text.length * 4 + 6;
+      ctx.fillStyle = C.black;
+      ctx.fillRect(240 - w / 2, 222, w, 11);
+      drawText(ctx, s.message.text, 240, 225, s.message.color, 1, 'center');
+    }
     this.drawSeatBar(s);
     if (!s.locked && seat !== 'loader') this.drawClickToPlay();
   }
@@ -187,12 +201,51 @@ export class Hud {
     const elev = (s.tank.gunPitch * 180) / Math.PI;
     drawText(ctx, 'ELEV ' + (elev >= 0 ? '+' : '') + elev.toFixed(1), 380, 214, C.lime);
     drawText(ctx, 'ZOOM ' + s.zoomLabel + ' (RMB)', 380, 224, C.lime);
-    drawText(ctx, 'BREECH EMPTY', 380, 234, C.red);
+    const g = s.gun;
+    const [status, color] = s.tank.isBroken('gun')
+      ? ['GUN BROKEN', C.red]
+      : g.ready
+        ? ['READY - LMB FIRE', C.lime]
+        : g.shellInBreech
+          ? ['LOADED, BREECH OPEN', C.yellow]
+          : ['EMPTY - GO LOAD', C.red];
+    drawText(ctx, status, 380, 234, color);
+    if (s.tank.isBroken('optics')) this.drawStatic(cx - r, cy - r, r * 2, r * 2, s.time);
+  }
+
+  /** Broken optics: snow over the sight. */
+  private drawStatic(x: number, y: number, w: number, h: number, time: number) {
+    const ctx = this.ctx;
+    let seed = Math.floor(time * 12) * 7919;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < (w * h) / 6; i++) {
+      ctx.fillStyle = rnd() < 0.5 ? C.white : C.black;
+      ctx.fillRect(x + Math.floor(rnd() * w), y + Math.floor(rnd() * h), 2, 1);
+    }
+  }
+
+  /** Health and broken parts: warning lights, shown in every seat. */
+  private drawDamage(s: HudState) {
+    const ctx = this.ctx;
+    const d = s.tank.damage;
+    ctx.fillStyle = C.black;
+    ctx.fillRect(4, 4, 74, 9 + d.broken.size * 9);
+    ctx.fillStyle = C.purple;
+    ctx.fillRect(6, 6, 70, 5);
+    ctx.fillStyle = d.health > 50 ? C.lime : d.health > 25 ? C.yellow : C.red;
+    ctx.fillRect(6, 6, Math.round((70 * d.health) / TANK_HEALTH), 5);
+    let y = 14;
+    const blink = Math.floor(s.time * 4) % 2 === 0;
+    for (const [part, t] of d.broken) {
+      drawText(ctx, `${PART_LABEL[part]} ${Math.ceil(t)}S`, 6, y, blink ? C.red : C.yellow);
+      y += 9;
+    }
   }
 
   // --- Loader: no view outside. Shell rack and breech. ---
   private drawLoader(s: HudState) {
     const ctx = this.ctx;
+    const g = s.gun, ld = s.loader;
     ctx.fillStyle = this.quilt;
     ctx.fillRect(0, 0, W, H);
     // flickering tube light
@@ -200,39 +253,71 @@ export class Hud {
     ctx.fillStyle = flick ? C.white : C.cyan;
     ctx.fillRect(140, 8, 200, 6);
 
-    // Rack
+    // Rack: shells fill from the top.
     ctx.fillStyle = C.black;
-    ctx.fillRect(24, 40, 170, 170);
-    drawText(ctx, 'RACK', 109, 30, C.yellow, 2, 'center');
+    ctx.fillRect(RACK.x, RACK.y, RACK.w, RACK.h);
+    drawText(ctx, 'RACK', RACK.x + RACK.w / 2, 30, C.yellow, 2, 'center');
     for (let i = 0; i < 6; i++) {
-      const y = 50 + i * 26;
-      ctx.fillStyle = C.yellow;
-      ctx.fillRect(40, y, 110, 14);
-      ctx.fillStyle = C.red;
-      ctx.fillRect(150, y + 2, 18, 10);
-      ctx.fillStyle = '#c9a800';
-      ctx.fillRect(40, y + 11, 110, 3);
+      const r = LoaderStation.slot(i);
+      const held = ld.dragging && i === g.rack - 1;
+      if (i < g.rack && !held) this.drawShell(r.x, r.y);
+      else {
+        ctx.fillStyle = C.purple;
+        ctx.fillRect(r.x, r.y + 5, r.w + 18, 4);
+      }
     }
+    // Refill from storage
+    ctx.fillStyle = C.purple;
+    ctx.fillRect(RACK.x + 10, RACK.y + RACK.h - 8, RACK.w - 20, 4);
+    ctx.fillStyle = C.lime;
+    ctx.fillRect(RACK.x + 10, RACK.y + RACK.h - 8, Math.round((RACK.w - 20) * g.refillProgress), 4);
+    drawText(ctx, `RACK ${g.rack}   STORE ${g.storage}/${STORAGE_SIZE}`, RACK.x + RACK.w / 2, 220, C.white, 1, 'center');
 
     // Breech
     ctx.fillStyle = '#3a3a3a';
-    ctx.fillRect(280, 70, 150, 110);
+    ctx.fillRect(BREECH.x, BREECH.y, BREECH.w, BREECH.h);
+    ctx.fillStyle = C.lime;
+    ctx.fillRect(BREECH.x, BREECH.y, BREECH.w, 4);
     ctx.fillStyle = C.black;
     ctx.beginPath();
-    ctx.arc(355, 125, 26, 0, Math.PI * 2);
+    ctx.arc(BREECH.cx, BREECH.cy, BREECH.r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = C.lime;
-    ctx.fillRect(280, 70, 150, 4);
-    drawText(ctx, 'BREECH OPEN', 355, 190, C.yellow, 2, 'center');
+    if (g.shellInBreech) {
+      // shell base seen end-on
+      ctx.fillStyle = C.yellow;
+      ctx.beginPath();
+      ctx.arc(BREECH.cx, BREECH.cy, BREECH.r - 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#c9a800';
+      ctx.fillRect(BREECH.cx - 3, BREECH.cy - 3, 6, 6);
+    }
+    if (!g.breechOpen) {
+      // breech block slid across
+      ctx.fillStyle = '#6a6a6a';
+      ctx.fillRect(BREECH.cx - 34, BREECH.cy - 34, 68, 68);
+      ctx.fillStyle = C.yellow;
+      for (let i = 0; i < 68; i += 8) ctx.fillRect(BREECH.cx - 34 + i, BREECH.cy - 34, 4, 4);
+    }
+    const breechText = g.breechOpen ? (g.shellInBreech ? 'LOADED - SPACE TO CLOSE' : 'OPEN - DROP A SHELL IN') : g.shellInBreech ? 'CLOSED - READY' : 'CLOSED EMPTY - SPACE OPENS';
+    drawText(ctx, breechText, BREECH.cx, 190, g.ready ? C.lime : C.yellow, 1, 'center');
+    if (s.tank.isBroken('gun')) drawText(ctx, 'GUN BROKEN', BREECH.cx, 200, C.red, 1, 'center');
 
-    drawText(ctx, 'RACK 6   STORE 30', 109, 220, C.white, 1, 'center');
-    drawText(ctx, 'DRAG-TO-LOAD ARRIVES IN MILESTONE 2', 240, 236, C.black, 1, 'center');
-
-    // Free cursor
+    // Dragged shell follows the cursor
     const [mx, my] = s.mouse;
+    if (ld.dragging) this.drawShell(mx - SHELL.w / 2, my - SHELL.h / 2);
     ctx.fillStyle = C.lime;
     ctx.fillRect(mx - 3, my, 7, 1);
     ctx.fillRect(mx, my - 3, 1, 7);
+  }
+
+  private drawShell(x: number, y: number) {
+    const ctx = this.ctx;
+    ctx.fillStyle = C.yellow;
+    ctx.fillRect(x, y, SHELL.w, SHELL.h);
+    ctx.fillStyle = '#c9a800';
+    ctx.fillRect(x, y + SHELL.h - 3, SHELL.w, 3);
+    ctx.fillStyle = C.red;
+    ctx.fillRect(x + SHELL.w, y + 2, 18, SHELL.h - 4);
   }
 
   // --- Lookout: head out of the hatch ---
@@ -251,6 +336,7 @@ export class Hud {
       ctx.arc(W / 2 + 60, H / 2, 100, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
+      if (s.tank.isBroken('optics')) this.drawStatic(W / 2 - 160, H / 2 - 100, 320, 200, s.time);
     } else {
       // hatch rim along the bottom
       ctx.fillStyle = C.black;
@@ -335,13 +421,14 @@ export class Hud {
   private drawClickToPlay() {
     const ctx = this.ctx;
     ctx.fillStyle = 'rgba(20,0,26,0.85)';
-    ctx.fillRect(60, 40, 360, 120);
+    ctx.fillRect(40, 40, 400, 130);
     drawText(ctx, 'SKELETON CREW', 240, 52, C.pink, 3, 'center');
     drawText(ctx, 'CLICK TO CLIMB IN', 240, 80, C.lime, 2, 'center');
     const help = [
       '1-4 CHANGE SEAT (2 SECONDS, ANY SEAT)',
       'DRIVER: W/S THROTTLE  A/D STEER  X CENTRE  SPACE BRAKE',
-      'GUNNER: MOUSE AIM  RMB ZOOM  SHIFT FINE',
+      'GUNNER: MOUSE AIM  LMB FIRE  RMB ZOOM  SHIFT FINE',
+      'LOADER: DRAG A SHELL INTO THE BREECH  SPACE OPENS/CLOSES',
       'LOOKOUT: MOUSE LOOK  RMB BINOCULARS',
     ];
     help.forEach((line, i) => drawText(ctx, line, 240, 104 + i * 10, C.yellow, 1, 'center'));
