@@ -9,7 +9,8 @@ export class Input {
   mouseButtons = new Set<number>();
   mouseX = 0; // canvas pixels (low-res space), for the loader cursor
   mouseY = 0;
-  clicks: Array<{ x: number; y: number; button: number }> = [];
+  clicks: Array<{ x: number; y: number; button: number; locked: boolean }> = []; // locked: was the mouse captured when clicked
+  everLocked = false;
 
   constructor(private target: HTMLElement, private toLowRes: (cx: number, cy: number) => [number, number]) {
     window.addEventListener('keydown', (e) => {
@@ -29,10 +30,13 @@ export class Input {
     window.addEventListener('mousedown', (e) => {
       this.mouseButtons.add(e.button);
       const [x, y] = this.toLowRes(e.clientX, e.clientY);
-      this.clicks.push({ x, y, button: e.button });
+      this.clicks.push({ x, y, button: e.button, locked: this.locked });
     });
     window.addEventListener('mouseup', (e) => this.mouseButtons.delete(e.button));
     window.addEventListener('contextmenu', (e) => e.preventDefault());
+    document.addEventListener('pointerlockchange', () => {
+      if (this.locked) this.everLocked = true;
+    });
   }
 
   get locked() {

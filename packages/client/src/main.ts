@@ -168,6 +168,8 @@ async function start() {
       if (n >= 0 && seats.current !== SEATS[n] && !(seats.switching && seats.target === SEATS[n])) {
         seats.request(SEATS[n]);
         loader.cancel();
+        // Grab the mouse now, while the key press still counts as a user gesture.
+        if (SEATS[n] !== 'loader') input.lock();
         audio.play('crawl');
       }
       if (seats.current === 'loader' && code === 'Space') {
@@ -195,8 +197,9 @@ async function start() {
     const clicks = input.takeClicks();
     if (clicks.length) audio.unlock();
     const [dx, dy] = input.takeMouse();
-    const rmb = clicks.some((c) => c.button === 2);
-    const lmb = clicks.some((c) => c.button === 0);
+    // A click that captures the mouse is not also a game action (no firing on the grab click).
+    const rmb = clicks.some((c) => c.button === 2 && c.locked);
+    const lmb = clicks.some((c) => c.button === 0 && c.locked);
     switch (seats.current) {
       case 'driver':
         look.driver.yaw = clamp(look.driver.yaw - dx * MOUSE_SENS, DRIVER_LOOK);
@@ -206,7 +209,7 @@ async function start() {
         const sens = MOUSE_SENS * (GUNNER_FOV[gunnerZoom] / 60) * (input.isHeld('ShiftLeft') ? 0.3 : 1);
         tank.aimBy(-dx * sens, -dy * sens);
         if (rmb) gunnerZoom = gunnerZoom === '2X' ? '4X' : '2X';
-        if (lmb && input.locked) fire();
+        if (lmb) fire();
         break;
       }
       case 'loader': {
@@ -308,6 +311,7 @@ async function start() {
     hud.draw({
       seats, tank, time,
       locked: input.locked || TEST_MODE,
+      everLocked: input.everLocked,
       fovDeg: view.fov,
       zoomLabel: view.zoom,
       heading: compass(fwd.x, fwd.z),

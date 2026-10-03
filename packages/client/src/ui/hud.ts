@@ -26,6 +26,7 @@ export interface HudState {
   tank: TankSim;
   time: number;
   locked: boolean;
+  everLocked: boolean; // the full instructions show only until the first time you climb in
   fovDeg: number; // vertical fov of the current view
   zoomLabel: string;
   heading: number; // degrees, hull forward, 0 = north (-z)
@@ -78,7 +79,10 @@ export class Hud {
       drawText(ctx, s.message.text, 240, 225, s.message.color, 1, 'center');
     }
     this.drawSeatBar(s);
-    if (!s.locked && seat !== 'loader') this.drawClickToPlay();
+    if (!s.locked && seat !== 'loader') {
+      if (s.everLocked) this.drawGrabMouse();
+      else this.drawClickToPlay();
+    }
   }
 
   // --- Driver: a narrow slit in a padded pink wall, levers below ---
@@ -416,6 +420,14 @@ export class Hud {
     // Lever state is always known: you set it.
     const steerArrows = s.tank.steer === 0 ? '--' : (s.tank.steer < 0 ? '<' : '>').repeat(Math.round(Math.abs(s.tank.steer) * 4));
     drawText(ctx, `THR ${THROTTLE_LABEL[s.tank.throttleIdx]}  STR ${steerArrows}`, W - 4, H - 9, C.cyan, 1, 'right');
+  }
+
+  /** After the first time: a small strip, not the whole instructions panel. */
+  private drawGrabMouse() {
+    const ctx = this.ctx;
+    ctx.fillStyle = C.black;
+    ctx.fillRect(150, 30, 180, 11);
+    drawText(ctx, 'CLICK TO GRAB THE MOUSE', 240, 33, C.yellow, 1, 'center');
   }
 
   private drawClickToPlay() {
