@@ -4,6 +4,9 @@ import { GUN_OFFSET, TURRET_OFFSET } from '../sim/tank';
 import { tex } from '../render/textures';
 import { wobble } from '../render/pipeline';
 
+/** Metres of track covered by one copy of the track texture (4 tread links). */
+export const TRACK_TEXTURE_LENGTH = 1.4;
+
 export interface TankModel {
   root: THREE.Group; // hull frame: origin at hull centre, forward -z
   turret: THREE.Group; // rotates about y
@@ -28,12 +31,13 @@ export function buildTankModel(): TankModel {
   const trackMaps: THREE.Texture[] = [];
   for (const side of [-1, 1]) {
     const map = tex.track();
-    map.repeat.set(1, 8);
     trackMaps.push(map);
-    const track = new THREE.Mesh(new THREE.BoxGeometry(0.75, 1.1, hz * 2 + 0.3), mat(map));
+    const geo = new THREE.BoxGeometry(0.75, 1.1, hz * 2 + 0.3);
+    // Texture v follows the track's length on every face, so the tread lines run across it.
+    const pos = geo.attributes.position, uv = geo.attributes.uv;
+    for (let i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i) + pos.getY(i), pos.getZ(i) / TRACK_TEXTURE_LENGTH);
+    const track = new THREE.Mesh(geo, mat(map));
     track.position.set(side * (hx - 0.3), -hy - 0.15, 0);
-    // texture runs along the track's length
-    map.rotation = Math.PI / 2;
     root.add(track);
   }
 

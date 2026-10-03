@@ -6,7 +6,7 @@ import {
 } from '@skeleton-crew/shared';
 import { Pipeline } from './render/pipeline';
 import { World } from './world';
-import { buildTankModel } from './models/tank';
+import { buildTankModel, TRACK_TEXTURE_LENGTH } from './models/tank';
 import { TankSim } from './sim/tank';
 import { Seats, SEATS } from './seats/seats';
 import { Input } from './input';
@@ -294,8 +294,8 @@ async function start() {
     model.root.quaternion.copy(hullQuat);
     model.turret.rotation.y = tank.turretYaw;
     model.gun.rotation.x = tank.gunPitch;
-    model.trackMaps[0].offset.x -= tank.trackSpeed[0] * dt * 0.25;
-    model.trackMaps[1].offset.x -= tank.trackSpeed[1] * dt * 0.25;
+    model.trackMaps[0].offset.y += (tank.trackSpeed[0] * dt) / TRACK_TEXTURE_LENGTH;
+    model.trackMaps[1].offset.y += (tank.trackSpeed[1] * dt) / TRACK_TEXTURE_LENGTH;
     model.root.updateMatrixWorld(true);
 
     const view = placeCamera();

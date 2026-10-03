@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { RESPAWN_DELAY, type GameMap, type Spawn } from '@skeleton-crew/shared';
 import { TankSim } from './sim/tank';
-import { buildTankModel, type TankModel } from './models/tank';
+import { buildTankModel, TRACK_TEXTURE_LENGTH, type TankModel } from './models/tank';
 import type { Audio, Loop } from './audio';
 import type { Fx } from './fx';
 
@@ -134,8 +134,8 @@ export class Targets {
       t.model.root.quaternion.copy(quat);
       t.model.turret.rotation.y = t.sim.turretYaw;
       t.model.gun.rotation.x = t.sim.gunPitch;
-      t.model.trackMaps[0].offset.x -= t.sim.trackSpeed[0] * dt * 0.25;
-      t.model.trackMaps[1].offset.x -= t.sim.trackSpeed[1] * dt * 0.25;
+      t.model.trackMaps[0].offset.y += (t.sim.trackSpeed[0] * dt) / TRACK_TEXTURE_LENGTH;
+      t.model.trackMaps[1].offset.y += (t.sim.trackSpeed[1] * dt) / TRACK_TEXTURE_LENGTH;
       t.engine.setPosition(pos);
       if (t.deadFor <= 0) t.engine.setRate(0.6 + Math.abs(t.sim.speed) / 12);
     }
