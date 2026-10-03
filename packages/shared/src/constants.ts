@@ -33,8 +33,12 @@ export const FOG_FAR = 450; // m: nothing visible beyond
 export const DESTRUCT_SPEED = 3; // m/s, tank speed that breaks fences and trees
 
 // Rendering
+// HUD layout resolution: every HUD coordinate is in these pixels.
 export const RENDER_WIDTH = 480;
 export const RENDER_HEIGHT = 270;
+// 3D view resolution: the world renders this small, then scales up chunky. Same 16:9 as the HUD.
+export const VIEW_WIDTH = 640;
+export const VIEW_HEIGHT = 360;
 
 export const PHYSICS_HZ = 60;
 

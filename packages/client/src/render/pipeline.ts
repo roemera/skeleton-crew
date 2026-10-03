@@ -1,10 +1,10 @@
 import * as THREE from 'three';
-import { RENDER_HEIGHT, RENDER_WIDTH } from '@skeleton-crew/shared';
+import { VIEW_HEIGHT, VIEW_WIDTH } from '@skeleton-crew/shared';
 
 // Low-res render -> colour-crushed, dithered post pass -> nearest-neighbour upscale (CSS).
 
 // Vertex snapping grid (coarser than the render target gives the PS1 wobble).
-const SNAP = new THREE.Vector2(RENDER_WIDTH / 3, RENDER_HEIGHT / 3);
+const SNAP = new THREE.Vector2(VIEW_WIDTH / 3, VIEW_HEIGHT / 3);
 
 /** Patch a material so its vertices snap to a coarse screen grid. */
 export function wobble<T extends THREE.Material>(mat: T): T {
@@ -58,9 +58,9 @@ export class Pipeline {
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(1);
-    this.renderer.setSize(RENDER_WIDTH, RENDER_HEIGHT, false);
+    this.renderer.setSize(VIEW_WIDTH, VIEW_HEIGHT, false);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.target = new THREE.WebGLRenderTarget(RENDER_WIDTH, RENDER_HEIGHT, {
+    this.target = new THREE.WebGLRenderTarget(VIEW_WIDTH, VIEW_HEIGHT, {
       minFilter: THREE.NearestFilter,
       magFilter: THREE.NearestFilter,
       depthBuffer: true,
