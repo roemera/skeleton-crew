@@ -15,9 +15,13 @@ Design doc: https://claude.ai/code/artifact/6ed43f7e-4ee7-4297-b6c4-ff1759a31cf7
 
 ## Code
 
-- npm workspaces: `packages/shared` (constants, map gen, damage rules; used by client and server),
-  `packages/client` (Vite + Three.js + Rapier).
+- npm workspaces: `packages/shared` (constants, map gen, damage rules, protocol; used by client and
+  server), `packages/client` (Vite + Three.js + Rapier), `packages/server` (Node + ws).
+- Server and shared run as TypeScript directly in Node (type stripping): only erasable syntax
+  (no enums, no constructor parameter properties) and `.ts` extensions on relative imports.
+  `npm run typecheck` enforces this.
 - Tuning numbers live in `packages/shared/src/constants.ts` and `hitzones.ts`.
-- Check: `npx tsc -p packages/client --noEmit` and `npm run build`.
-- Run: `npm run dev`, open `http://localhost:5173/?test` for headless checks (hides the click-to-play
+- Check: `npm run typecheck` and `npm run build`.
+- Run: `npm run server` + `npm run dev`; `?test&offline` for headless single-player checks,
+  `?test&join=localhost:5173&name=A&password=pw` for multiplayer ones (hides the click-to-play
   panel). `window.__game` exposes the tank, gun, targets, `fire()` and `aimAt()` for scripted tests.

@@ -7,16 +7,31 @@ Stack: TypeScript, Three.js, Rapier (WebAssembly physics), Vite. Everything (map
 
 ## Run
 
+Needs Node 22.18+ (runs the server's TypeScript directly, no build step).
+
+**Play with friends (one port to forward):**
+
 ```
 npm install
-npm run dev        # http://localhost:5173
+copy server.config.example.json server.config.json   # then set the password (cp on Mac/Linux)
+npm start                                            # builds the game, serves it + the WebSocket on :8080
 ```
+
+Everyone opens `http://<host ip>:8080`, enters a name and the password, and clicks READY.
+The match starts when everyone (2+) is ready, or when the host types `start` in the server console
+(works solo). Forward TCP port 8080 on the host's router for players outside your network.
+`PORT`, `PASSWORD` and `MAP_SEED` environment variables override the config file.
+
+**Developing:** run `npm run server` in one terminal and `npm run dev` in another, then open
+http://localhost:5173 (Vite proxies the WebSocket to the server on 8080). PRACTICE OFFLINE on the
+join screen gives the single-player range with target tanks.
 
 `npm run dev` and `npm run build` first run `scripts/ensure-native.mjs`, which installs Vite's native
 binaries for your platform if npm skipped them (a known npm bug that shows up on Windows as
 "Cannot find native binding").
 
-Options: `?seed=123` picks a different map; `?test` hides the click-to-play panel (for headless checks).
+URL options: `?offline` skips the menu, `?join=host:port&name=X&password=Y` joins directly,
+`?seed=123` picks the offline map, `?test` hides the click-to-play panel (for headless checks).
 
 ## Controls
 
@@ -48,10 +63,12 @@ hear clearly. Click or press a key once to start audio (browser rule).
 ```
 packages/
   shared/   constants.ts (tuning), mapgen.ts (seeded map), rng.ts
-  shared/   hitzones.ts (damage table, TankDamage)
+  shared/   hitzones.ts (damage table, TankDamage), protocol.ts (messages, 52-byte tank state)
+  server/   main.ts (http + WebSocket on one port), match.ts (lobby, countdown, spawns), config.ts
   client/   main.ts (loop), sim/tank.ts (physics), sim/gun.ts (breech, rack), sim/shells.ts (ballistics),
             seats/, ui/ (HUD, loader station, bitmap font), render/ (low-res pipeline, vertex wobble,
-            textures), models/, world.ts, targets.ts (practice tanks), fx.ts, audio.ts
+            textures), models/, world.ts, targets.ts (practice tanks), fx.ts, audio.ts,
+            net.ts (WebSocket client), remotes.ts (other players, interpolated), ui/menu.ts (join, lobby)
 ```
 
 ## Status
@@ -59,4 +76,5 @@ packages/
 - Milestone 1 (offline driving and seats): done.
 - Milestone 2 (offline shooting and loading, directional sound): done. Four practice tanks sit ahead
   of the spawn; one drives in circles.
-- Next: milestone 3, the server and networked movement.
+- Milestone 3 (server, password, lobby, other tanks moving and colliding): done.
+- Next: milestone 4, networked combat (shots, damage, kills, respawn, scoreboard).

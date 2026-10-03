@@ -7,7 +7,11 @@
     "noEmit": true,
     "skipLibCheck": true,
     "isolatedModules": true,
-    "allowImportingTsExtensions": false,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+    "allowImportingTsExtensions": true,
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ]
   }
 }

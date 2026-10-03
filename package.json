@@ -8,8 +8,10 @@
   "scripts": {
     "predev": "node scripts/ensure-native.mjs",
     "dev": "npm run dev -w @skeleton-crew/client",
+    "server": "node packages/server/src/main.ts",
     "prebuild": "node scripts/ensure-native.mjs",
     "build": "npm run build -w @skeleton-crew/client",
-    "typecheck": "tsc -p packages/client --noEmit"
+    "start": "npm run build && npm run server",
+    "typecheck": "tsc -p packages/shared --noEmit && tsc -p packages/server --noEmit && tsc -p packages/client --noEmit"
   }
 }

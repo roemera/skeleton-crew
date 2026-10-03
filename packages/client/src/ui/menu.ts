@@ -1,0 +1,119 @@
+import type { Phase, PlayerInfo } from '@skeleton-crew/shared';
+
+// Join screen and lobby: plain HTML over the game canvas, styled to hurt a little.
+
+const CSS = `
+#menu { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: repeating-linear-gradient(45deg, #ff4fd8 0 12px, #a3127f 12px 24px);
+  font: bold 16px/1.3 "Courier New", monospace; color: #b6ff00; z-index: 10; }
+#menu.see-through { background: rgba(20,0,26,0.55); }
+#menu .box { background: #14001a; border: 6px solid #ffe600; padding: 20px 24px; width: min(420px, 90vw);
+  box-shadow: 10px 10px 0 #00ffe1; }
+#menu h1 { margin: 0 0 12px; color: #ff4fd8; font-size: 30px; letter-spacing: 2px; transform: skewX(-8deg); }
+#menu label { display: block; margin: 10px 0 2px; color: #ffe600; }
+#menu input { width: 100%; box-sizing: border-box; font: inherit; padding: 6px; background: #5b0fa8; color: #fff;
+  border: 3px solid #b6ff00; }
+#menu button { font: inherit; margin: 14px 8px 0 0; padding: 8px 14px; cursor: pointer; border: 3px solid #14001a;
+  background: #b6ff00; color: #14001a; box-shadow: 4px 4px 0 #ff4fd8; }
+#menu button.alt { background: #00ffe1; }
+#menu button:active { transform: translate(3px, 3px); box-shadow: 1px 1px 0 #ff4fd8; }
+#menu .error { color: #ff1f3d; min-height: 1.3em; margin-top: 10px; }
+#menu ul { list-style: none; padding: 0; margin: 8px 0; }
+#menu li { padding: 3px 6px; margin: 3px 0; background: #2a0033; }
+#menu li.ready { color: #14001a; background: #b6ff00; }
+#menu .note { color: #00ffe1; font-size: 13px; margin-top: 10px; }
+`;
+
+export type JoinChoice = { mode: 'offline' } | { mode: 'online'; server: string; name: string; password: string };
+
+const store = {
+  get: (k: string) => {
+    try {
+      return localStorage.getItem('sc.' + k) ?? '';
+    } catch {
+      return '';
+    }
+  },
+  set: (k: string, v: string) => {
+    try {
+      localStorage.setItem('sc.' + k, v);
+    } catch {
+      /* private mode: fine */
+    }
+  },
+};
+
+export class Menu {
+  private root: HTMLDivElement;
+
+  constructor() {
+    const style = document.createElement('style');
+    style.textContent = CSS;
+    document.head.append(style);
+    this.root = document.createElement('div');
+    this.root.id = 'menu';
+    document.body.append(this.root);
+  }
+
+  /** Ask how to play. Resolves when the player picks. */
+  join(error = ''): Promise<JoinChoice> {
+    this.root.classList.remove('see-through');
+    this.root.style.display = 'flex';
+    this.root.innerHTML = `
+      <form class="box">
+        <h1>SKELETON CREW</h1>
+        <label>SERVER</label><input name="server" spellcheck="false">
+        <label>YOUR NAME</label><input name="name" maxlength="16" spellcheck="false">
+        <label>PASSWORD</label><input name="password" type="password">
+        <div class="error"></div>
+        <button type="submit">CLIMB IN</button><button type="button" class="alt">PRACTICE OFFLINE</button>
+      </form>`;
+    const form = this.root.querySelector('form')!;
+    const field = (n: string) => form.querySelector<HTMLInputElement>(`input[name=${n}]`)!;
+    field('server').value = store.get('server') || location.host;
+    field('name').value = store.get('name') || 'TANK' + Math.floor(Math.random() * 100);
+    field('password').value = store.get('password');
+    form.querySelector('.error')!.textContent = error;
+    return new Promise((resolve) => {
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const choice = { mode: 'online' as const, server: field('server').value.trim(), name: field('name').value.trim(), password: field('password').value };
+        store.set('server', choice.server);
+        store.set('name', choice.name);
+        store.set('password', choice.password);
+        form.querySelector('.error')!.textContent = 'CONNECTING...';
+        resolve(choice);
+      });
+      form.querySelector('button.alt')!.addEventListener('click', () => resolve({ mode: 'offline' }));
+    });
+  }
+
+  /** Lobby: who's here and who's ready. */
+  lobby(players: PlayerInfo[], phase: Phase, countdown: number, myId: number, onReady: (ready: boolean) => void) {
+    this.root.classList.add('see-through');
+    this.root.style.display = 'flex';
+    const me = players.find((p) => p.id === myId);
+    const status =
+      phase === 'countdown'
+        ? `STARTING IN ${countdown}...`
+        : players.length < 2
+          ? 'WAITING FOR MORE TANKS (OR THE HOST TYPES START)'
+          : 'STARTS WHEN EVERYONE IS READY';
+    this.root.innerHTML = `
+      <div class="box">
+        <h1>LOBBY</h1>
+        <ul>${players.map((p) => `<li class="${p.ready ? 'ready' : ''}">${p.id === myId ? '&gt; ' : ''}${escape(p.name)}${p.ready ? ' - READY' : ''}</li>`).join('')}</ul>
+        <div class="note">${status}</div>
+        ${phase === 'lobby' ? `<button>${me?.ready ? 'NOT READY' : 'READY'}</button>` : ''}
+      </div>`;
+    this.root.querySelector('button')?.addEventListener('click', () => onReady(!me?.ready));
+  }
+
+  hide() {
+    this.root.style.display = 'none';
+  }
+}
+
+function escape(s: string) {
+  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+}

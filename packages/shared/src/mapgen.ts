@@ -1,5 +1,5 @@
-import { MAP_CELLS, MAP_SIZE } from './constants';
-import { makeNoise2, makeRng } from './rng';
+import { MAP_CELLS, MAP_SIZE } from './constants.ts';
+import { makeNoise2, makeRng } from './rng.ts';
 
 export type MapObjectKind = 'rock' | 'building' | 'silo' | 'tree' | 'fence' | 'wall';
 

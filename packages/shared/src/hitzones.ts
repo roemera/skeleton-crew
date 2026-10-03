@@ -1,4 +1,4 @@
-import { TANK_HEALTH } from './constants';
+import { TANK_HEALTH } from './constants.ts';
 
 // Where a shell hits decides the damage and which part it can break (design doc, Damage table).
 

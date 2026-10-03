@@ -57,10 +57,14 @@ export class TankSim {
   private points: THREE.Vector3[] = [];
   private tmp = { a: v3(), b: v3(), c: v3(), d: v3(), e: v3(), f: v3(), n: v3(), q: new THREE.Quaternion() };
 
-  constructor(private world: RAPIER.World, spawn: Spawn, groundY: number) {
+  /**
+   * `kinematic` tanks are other players: moved by network updates, solid to your tank and to shells,
+   * but not pushed around by anything.
+   */
+  constructor(private world: RAPIER.World, spawn: Spawn, groundY: number, kinematic = false) {
     const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), spawn.rotY);
     this.body = world.createRigidBody(
-      RAPIER.RigidBodyDesc.dynamic()
+      (kinematic ? RAPIER.RigidBodyDesc.kinematicPositionBased() : RAPIER.RigidBodyDesc.dynamic())
         .setTranslation(spawn.x, groundY + 2.2, spawn.z)
         .setRotation({ x: q.x, y: q.y, z: q.z, w: q.w })
         .setCanSleep(false)
@@ -153,6 +157,25 @@ export class TankSim {
     const dp = this.gunPitchCmd - this.gunPitch;
     this.gunPitch += Math.sign(dp) * Math.min(Math.abs(dp), GUN_ELEVATION_RATE * dt);
     this.syncTurretColliders();
+  }
+
+  /** Set turret and gun angles directly (remote tanks). */
+  setTurret(yaw: number, pitch: number) {
+    this.turretYaw = this.turretYawCmd = yaw;
+    this.gunPitch = this.gunPitchCmd = pitch;
+    this.syncTurretColliders();
+  }
+
+  /** Move to a spawn point, stopped, with levers centred (match start, respawn). */
+  teleport(spawn: Spawn, groundY: number) {
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), spawn.rotY);
+    this.body.setTranslation({ x: spawn.x, y: groundY + 2.2, z: spawn.z }, true);
+    this.body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
+    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    this.throttleIdx = THROTTLE_STEPS.indexOf(0);
+    this.steer = 0;
+    this.setTurret(0, 0);
   }
 
   /** Turret and gun rotation in the hull frame. */

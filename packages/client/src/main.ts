@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import {
-  PART_LABEL, PHYSICS_HZ, RENDER_HEIGHT, RENDER_WIDTH, SHELL_SPEED, ZONE_LABEL, generateMap, hullZone,
-  type HitZone, type Part,
+  PART_LABEL, PHYSICS_HZ, RENDER_HEIGHT, RENDER_WIDTH, SEAT_CODES, SEAT_CRAWLING, SHELL_SPEED, STATE_HZ,
+  ZONE_LABEL, generateMap, hullZone, type HitZone, type Part, type Phase, type ServerMsg,
 } from '@skeleton-crew/shared';
 import { Pipeline } from './render/pipeline';
 import { World } from './world';
@@ -17,9 +17,12 @@ import { LoaderStation } from './ui/loader';
 import { Fx } from './fx';
 import { Audio } from './audio';
 import { Targets } from './targets';
+import { Remotes } from './remotes';
+import { Net } from './net';
+import { Menu } from './ui/menu';
 
 const params = new URLSearchParams(location.search);
-const MAP_SEED = Number(params.get('seed') ?? 1337);
+// ?offline skips the menu (practice). ?join=host&name=X&password=Y joins a server directly.
 // ?test hides the click-to-play panel (headless browsers cannot lock the pointer).
 const TEST_MODE = params.has('test');
 const STEP = 1 / PHYSICS_HZ;
@@ -36,8 +39,33 @@ const MOUSE_SENS = 0.0025; // rad per pixel at 60 deg fov
 const RECOIL_IMPULSE = 9000; // N*s
 const MESSAGE_TIME = 2.5; // s
 
+type Welcome = Extract<ServerMsg, { t: 'welcome' }>;
+
 async function start() {
   await RAPIER.init();
+  const menu = new Menu();
+  let error = '';
+  for (;;) {
+    const choice = params.has('offline')
+      ? ({ mode: 'offline' } as const)
+      : params.has('join')
+        ? ({ mode: 'online', server: params.get('join')!, name: params.get('name') ?? 'TEST', password: params.get('password') ?? '' } as const)
+        : await menu.join(error);
+    if (choice.mode === 'offline') {
+      menu.hide();
+      return runGame(menu, Number(params.get('seed') ?? 1337), null, null);
+    }
+    try {
+      const { net, welcome } = await Net.connect(choice.server, choice.name, choice.password);
+      return runGame(menu, welcome.seed, net, welcome);
+    } catch (e) {
+      error = String(e).toUpperCase();
+      if (params.has('join')) params.delete('join'); // fall back to the menu
+    }
+  }
+}
+
+function runGame(menu: Menu, seed: number, net: Net | null, welcome: Welcome | null) {
   const viewCanvas = document.getElementById('view') as HTMLCanvasElement;
   const hudCanvas = document.getElementById('hud') as HTMLCanvasElement;
 
@@ -57,10 +85,10 @@ async function start() {
   const pipeline = new Pipeline(viewCanvas);
   const physics = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   physics.timestep = STEP;
-  const map = generateMap(MAP_SEED);
+  const map = generateMap(seed);
   const world = new World(map, physics);
 
-  const spawn = map.spawns[0];
+  const spawn = map.spawns[welcome?.spawn ?? 0];
   const tank = new TankSim(physics, spawn, map.heightAt(spawn.x, spawn.z));
   const model = buildTankModel();
   world.scene.add(model.root);
@@ -72,7 +100,11 @@ async function start() {
   const fx = new Fx(world.scene);
   const audio = new Audio();
   const engine = audio.loop('engine');
-  const targets = new Targets(physics, world.scene, map, spawn, audio, fx);
+  // Offline: practice targets. Online: other players.
+  const targets = net ? null : new Targets(physics, world.scene, map, spawn, audio, fx);
+  const remotes = net ? new Remotes(physics, world.scene, audio) : null;
+  let phase: Phase = welcome?.phase ?? 'live';
+  const playing = () => phase === 'live';
 
   let message: { text: string; color: string; until: number } | null = null;
   const say = (text: string, color: string) => (message = { text, color, until: time + MESSAGE_TIME });
@@ -83,14 +115,13 @@ async function start() {
   function onShellHit(hit: ShellHit): HitOutcome {
     const broken = world.shellHit(hit.collider.handle, hit.dir);
     if (broken && broken.kind !== 'wall') return 'pass';
-    if (!broken && hit.collider.isSensor()) {
-      const t = targets.find(hit.collider);
-      if (!t) return 'pass'; // some other sensor
-    }
-    const found = targets.find(hit.collider);
-    fx.explosion(hit.point, found ? 1.2 : 1);
+    const remote = remotes?.find(hit.collider) ?? null;
+    const found = targets?.find(hit.collider) ?? null;
+    if (!broken && hit.collider.isSensor() && !found && !remote) return 'pass'; // some other sensor
+    fx.explosion(hit.point, found || remote ? 1.2 : 1);
     audio.play('explosion', { pos: hit.point });
-    if (found) {
+    if (remote) audio.play('impact', { pos: hit.point }); // damage over the network comes in milestone 4
+    if (found && targets) {
       audio.play('impact', { pos: hit.point });
       const { target, role } = found;
       if (target.deadFor > 0) return 'stop';
@@ -154,14 +185,74 @@ async function start() {
   let gunnerZoom: keyof typeof GUNNER_FOV = '2X';
 
   addEventListener('mousedown', () => {
-    if (seats.current !== 'loader') input.lock();
+    audio.unlock();
+    if (playing() && seats.current !== 'loader') input.lock();
   });
+
+  // --- Network ---
+  let sendTimer = 0;
+  if (net && remotes) {
+    const showLobby = (players: Parameters<Menu['lobby']>[0], countdown: number) =>
+      menu.lobby(players, phase, countdown, net.id, (ready) => net.setReady(ready));
+    if (phase !== 'live') showLobby(welcome!.players, 0);
+    else menu.hide();
+    net.onMessage = (msg) => {
+      if (msg.t === 'lobby') {
+        phase = msg.phase;
+        if (phase === 'live') menu.hide();
+        else {
+          input.unlock();
+          showLobby(msg.players, msg.countdown);
+        }
+      } else if (msg.t === 'spawn') {
+        const sp = map.spawns[msg.spawn];
+        tank.teleport(sp, map.heightAt(sp.x, sp.z));
+        tank.damage.reset();
+        gun.reset();
+        seats.current = seats.target = 'driver';
+        seats.remaining = 0;
+        say('GO GO GO', HUD_COLORS.lime);
+      } else if (msg.t === 'left') {
+        remotes.remove(msg.id);
+      }
+    };
+    net.onState = (st) => remotes.receive(st, time);
+    net.onClose = (reason) => {
+      input.unlock();
+      menu.join(`DISCONNECTED: ${reason.toUpperCase()}`).then(() => location.reload());
+    };
+  }
+
+  function sendState(dt: number) {
+    if (!net || !playing()) return;
+    sendTimer += dt;
+    if (sendTimer < 1 / STATE_HZ) return;
+    sendTimer %= 1 / STATE_HZ;
+    const p = tank.body.translation(), q = tank.body.rotation(), v = tank.body.linvel();
+    net.sendState({
+      id: 0,
+      seat: seats.current ? SEAT_CODES.indexOf(seats.current) : SEAT_CRAWLING,
+      pos: [p.x, p.y, p.z],
+      quat: [q.x, q.y, q.z, q.w],
+      vel: [v.x, v.y, v.z],
+      turretYaw: tank.turretYaw,
+      gunPitch: tank.gunPitch,
+    });
+  }
 
   const hullPos = new THREE.Vector3(), hullQuat = new THREE.Quaternion();
   const tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion(), tmpE = new THREE.Euler(0, 0, 0, 'YXZ');
   let acc = 0, last = performance.now() / 1000, time = 0;
 
   function handleInput() {
+    if (!playing()) {
+      // Lobby/countdown: tank parked, input ignored.
+      input.takePresses();
+      input.takeClicks();
+      input.takeMouse();
+      tank.brake = true;
+      return;
+    }
     for (const code of input.takePresses()) {
       audio.unlock();
       const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(code);
@@ -272,10 +363,11 @@ async function start() {
 
     handleInput();
     seats.update(dt);
+    remotes?.update(time, dt);
     acc += dt;
     while (acc >= STEP) {
       tank.step(STEP);
-      targets.step(STEP);
+      targets?.step(STEP);
       physics.step();
       world.checkBreaks(tank.hullCollider, Math.abs(tank.speed));
       shells.step(STEP);
@@ -283,7 +375,8 @@ async function start() {
     }
     if (gun.update(dt) && seats.current === 'loader') audio.play('clank', { rate: 1.2, volume: 0.4 });
     world.update(dt);
-    targets.update(dt);
+    targets?.update(dt);
+    sendState(dt);
     fx.syncTracers(shells.live);
     fx.update(dt);
     if (message && time > message.until) message = null;
@@ -310,7 +403,7 @@ async function start() {
     const fwd = tmpV.set(0, 0, -1).applyQuaternion(hullQuat);
     hud.draw({
       seats, tank, time,
-      locked: input.locked || TEST_MODE,
+      locked: input.locked || TEST_MODE || !playing(),
       everLocked: input.everLocked,
       fovDeg: view.fov,
       zoomLabel: view.zoom,
@@ -327,7 +420,8 @@ async function start() {
 
   // Handle for debugging and automated checks.
   (window as unknown as { __game: unknown }).__game = {
-    THREE, tank, seats, map, physics, look, world, gun, targets, shells, fire,
+    THREE, tank, seats, map, physics, look, world, gun, targets, remotes, shells, fire, net,
+    get phase() { return phase; },
     /** Point the gun at a world position, compensating for hull tilt and shell drop (for tests). */
     aimAt(x: number, y: number, z: number) {
       tank.pose(hullPos, hullQuat);
